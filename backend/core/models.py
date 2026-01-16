@@ -2,11 +2,11 @@
 Data Models
 ===========
 Pydantic models for type safety and API serialization.
-Compatible with Pydantic v1.
+Pydantic v2 compatible.
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -131,5 +131,5 @@ class DashboardStats(BaseModel):
     total_opportunities: int = 0
     high_confidence_opps: int = 0
     total_predictions: int = 0
-    markets_by_category: Dict = Field(default_factory=dict)
+    markets_by_category: Dict[str, Any] = Field(default_factory=dict)
     last_updated: Optional[datetime] = None
