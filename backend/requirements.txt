@@ -1,5 +1,10 @@
+# Core
 fastapi==0.109.0
-uvicorn==0.27.0
+uvicorn[standard]==0.27.0
 pydantic==2.5.3
 requests==2.31.0
 python-dateutil==2.8.2
+
+# Pin these to ensure pre-built wheels (avoids Rust compilation)
+pydantic-core==2.14.6
+annotated-types==0.6.0
