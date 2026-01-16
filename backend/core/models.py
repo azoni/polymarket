@@ -2,10 +2,11 @@
 Data Models
 ===========
 Pydantic models for type safety and API serialization.
+Compatible with Pydantic v1.
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Dict
 from datetime import datetime
 from enum import Enum
 
@@ -48,7 +49,7 @@ class Market(BaseModel):
     
     # Categorization
     category: MarketCategory = MarketCategory.OTHER
-    tags: List[str] = []
+    tags: List[str] = Field(default_factory=list)
     
     # Pricing
     current_price: float = 0.5
@@ -69,7 +70,7 @@ class Market(BaseModel):
     researchability_score: float = 0.0
     
     # Tokens
-    tokens: List[Token] = []
+    tokens: List[Token] = Field(default_factory=list)
     
     # Links
     polymarket_url: str = ""
@@ -117,8 +118,8 @@ class Prediction(BaseModel):
     
     # Analysis
     reasoning: str = ""
-    key_risks: List[str] = []
-    catalysts: List[str] = []
+    key_risks: List[str] = Field(default_factory=list)
+    catalysts: List[str] = Field(default_factory=list)
     
     # Agent info
     agent_name: str = ""
@@ -130,5 +131,5 @@ class DashboardStats(BaseModel):
     total_opportunities: int = 0
     high_confidence_opps: int = 0
     total_predictions: int = 0
-    markets_by_category: dict = {}
+    markets_by_category: Dict = Field(default_factory=dict)
     last_updated: Optional[datetime] = None
