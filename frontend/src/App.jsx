@@ -105,7 +105,7 @@ export default function App() {
     <div className="app">
       {/* Header */}
       <header className="header">
-        <h1>📊 Polymarket Edge Finder</h1>
+        <h1>Polymarket Edge Finder</h1>
         <div className="flex gap-sm">
           <button 
             className="btn btn-secondary" 
@@ -125,7 +125,7 @@ export default function App() {
                 Refreshing...
               </>
             ) : (
-              '↻ Refresh Data'
+              'Refresh Data'
             )}
           </button>
         </div>
