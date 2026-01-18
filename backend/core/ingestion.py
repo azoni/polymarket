@@ -221,6 +221,19 @@ def parse_datetime(dt_str: Optional[str]) -> Optional[datetime]:
     return None
 
 
+def safe_parse_json_field(value, default=None):
+    """Parse a field that might be a JSON string or already parsed."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        try:
+            import json
+            return json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return default
+    return value
+
+
 def process_market(raw: Dict, client: PolymarketClient = None) -> Market:
     """Convert raw API data to Market model."""
     
@@ -236,10 +249,10 @@ def process_market(raw: Dict, client: PolymarketClient = None) -> Market:
     description = raw.get("description", "")
     category = detect_category(question, description)
     
-    # Parse tokens
-    outcomes = raw.get("outcomes", ["Yes", "No"])
-    prices = raw.get("outcomePrices", [])
-    token_ids = raw.get("clobTokenIds", [])
+    # Parse tokens - these fields can be JSON strings
+    outcomes = safe_parse_json_field(raw.get("outcomes"), ["Yes", "No"])
+    prices = safe_parse_json_field(raw.get("outcomePrices"), [])
+    token_ids = safe_parse_json_field(raw.get("clobTokenIds"), [])
     
     tokens = []
     for i, outcome in enumerate(outcomes):
@@ -322,13 +335,22 @@ def ingest_markets(
     while len(all_raw) < max_markets:
         batch = client.get_markets(limit=100, offset=offset)
         if not batch:
+            logger.warning(f"No markets returned at offset {offset}")
             break
         all_raw.extend(batch)
+        logger.info(f"Fetched batch: {len(batch)} markets (total: {len(all_raw)})")
         if len(batch) < 100:
             break
         offset += 100
     
-    logger.info(f"Fetched {len(all_raw)} raw markets")
+    logger.info(f"Fetched {len(all_raw)} raw markets total")
+    
+    # Log a sample market structure for debugging
+    if all_raw:
+        sample = all_raw[0]
+        logger.info(f"Sample market keys: {list(sample.keys())}")
+        logger.info(f"Sample outcomePrices type: {type(sample.get('outcomePrices'))}")
+        logger.info(f"Sample outcomePrices value: {sample.get('outcomePrices')}")
     
     # Filter by volume
     filtered = [m for m in all_raw if float(m.get("volume24hr", 0) or 0) >= min_volume]
@@ -336,6 +358,7 @@ def ingest_markets(
     
     # Process markets
     markets = []
+    errors = 0
     for i, raw in enumerate(filtered[:max_markets]):
         if i % 20 == 0:
             logger.info(f"Processing {i}/{len(filtered[:max_markets])}...")
@@ -344,10 +367,17 @@ def ingest_markets(
             market = process_market(raw, client if fetch_orderbooks else None)
             markets.append(market)
         except Exception as e:
-            logger.error(f"Error processing market: {e}")
+            errors += 1
+            if errors <= 5:  # Only log first 5 errors in detail
+                logger.error(f"Error processing market '{raw.get('question', 'unknown')[:50]}': {e}")
+            elif errors == 6:
+                logger.error("Suppressing further error details...")
+    
+    if errors > 0:
+        logger.warning(f"Total processing errors: {errors}")
     
     # Sort by edge score
     markets.sort(key=lambda m: m.edge_score, reverse=True)
     
-    logger.info(f"Processed {len(markets)} markets")
+    logger.info(f"Successfully processed {len(markets)} markets")
     return markets

@@ -6,26 +6,41 @@
 // Use environment variable for API URL, fallback to /api for local dev with proxy
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
+console.log('[API] Base URL:', API_BASE);
+
 /**
  * Make a request to the API.
  */
 async function request(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
+  console.log(`[API] ${options.method || 'GET'} ${url}`);
   
-  const response = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-    ...options,
-  });
+  const startTime = Date.now();
+  
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+      ...options,
+    });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || `Request failed: ${response.status}`);
+    const elapsed = Date.now() - startTime;
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      console.error(`[API] Error ${response.status} (${elapsed}ms):`, error);
+      throw new Error(error.detail || `Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log(`[API] Success (${elapsed}ms):`, typeof data === 'object' ? `${Array.isArray(data) ? data.length + ' items' : 'object'}` : data);
+    return data;
+  } catch (err) {
+    console.error(`[API] Request failed:`, err);
+    throw err;
   }
-
-  return response.json();
 }
 
 /**

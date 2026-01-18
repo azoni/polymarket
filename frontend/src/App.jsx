@@ -23,10 +23,12 @@ export default function App() {
   const [predictions, setPredictions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshStatus, setRefreshStatus] = useState('');
   const [error, setError] = useState(null);
 
   // Fetch all data
   const fetchData = useCallback(async () => {
+    console.log('[fetchData] Starting data fetch...');
     try {
       setLoading(true);
       setError(null);
@@ -38,11 +40,19 @@ export default function App() {
         api.getPredictions({ limit: 50 }),
       ]);
       
+      console.log('[fetchData] Results:', {
+        stats: statsData,
+        markets: marketsData.length,
+        opportunities: oppsData.length,
+        predictions: predsData.length
+      });
+      
       setStats(statsData);
       setMarkets(marketsData);
       setOpportunities(oppsData);
       setPredictions(predsData);
     } catch (err) {
+      console.error('[fetchData] Error:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -56,11 +66,15 @@ export default function App() {
 
   // Load demo data
   const handleLoadDemo = async () => {
+    console.log('[handleLoadDemo] Loading demo data...');
     try {
       setLoading(true);
-      await api.loadDemoData();
+      setError(null);
+      const result = await api.loadDemoData();
+      console.log('[handleLoadDemo] Result:', result);
       await fetchData();
     } catch (err) {
+      console.error('[handleLoadDemo] Error:', err);
       setError(err.message);
       setLoading(false);
     }
@@ -68,28 +82,56 @@ export default function App() {
 
   // Refresh from Polymarket
   const handleRefresh = async () => {
+    console.log('[handleRefresh] Starting refresh...');
     try {
       setRefreshing(true);
+      setRefreshStatus('Starting refresh...');
       setError(null);
-      await api.refreshData({ maxMarkets: 100, minVolume: 1000 });
+      
+      const result = await api.refreshData({ maxMarkets: 100, minVolume: 1000 });
+      console.log('[handleRefresh] Refresh started:', result);
+      setRefreshStatus('Fetching markets from Polymarket...');
       
       // Poll for completion
+      let pollCount = 0;
+      const maxPolls = 60; // 2 minutes max
+      
       const pollInterval = setInterval(async () => {
+        pollCount++;
         try {
           const status = await api.getStatus();
+          console.log(`[handleRefresh] Poll ${pollCount}:`, status);
+          
+          if (status.markets_loaded > 0) {
+            setRefreshStatus(`Processing ${status.markets_loaded} markets...`);
+          }
+          
           if (!status.is_loading) {
+            console.log('[handleRefresh] Refresh complete');
             clearInterval(pollInterval);
             setRefreshing(false);
+            setRefreshStatus('');
+            await fetchData();
+          } else if (pollCount >= maxPolls) {
+            console.warn('[handleRefresh] Polling timeout');
+            clearInterval(pollInterval);
+            setRefreshing(false);
+            setRefreshStatus('');
+            setError('Refresh timed out. Check server logs.');
             await fetchData();
           }
         } catch (err) {
+          console.error('[handleRefresh] Poll error:', err);
           clearInterval(pollInterval);
           setRefreshing(false);
+          setRefreshStatus('');
           setError(err.message);
         }
       }, 2000);
     } catch (err) {
+      console.error('[handleRefresh] Error:', err);
       setRefreshing(false);
+      setRefreshStatus('');
       setError(err.message);
     }
   };
@@ -100,6 +142,9 @@ export default function App() {
     const date = new Date(dateStr);
     return date.toLocaleTimeString();
   };
+
+  // Check if we have data
+  const hasData = markets.length > 0 || opportunities.length > 0 || predictions.length > 0;
 
   return (
     <div className="app">
@@ -119,14 +164,7 @@ export default function App() {
             onClick={handleRefresh}
             disabled={loading || refreshing}
           >
-            {refreshing ? (
-              <>
-                <span className="spinner" style={{ width: 16, height: 16 }} />
-                Refreshing...
-              </>
-            ) : (
-              'Refresh Data'
-            )}
+            {refreshing ? 'Refreshing...' : 'Refresh Data'}
           </button>
         </div>
       </header>
@@ -143,7 +181,25 @@ export default function App() {
             marginBottom: 'var(--spacing-md)',
             color: 'var(--accent-red)'
           }}>
-            {error}
+            <strong>Error:</strong> {error}
+          </div>
+        )}
+
+        {/* Refresh Status Banner */}
+        {refreshing && refreshStatus && (
+          <div style={{ 
+            background: 'rgba(59, 130, 246, 0.1)', 
+            border: '1px solid var(--accent-blue)',
+            padding: 'var(--spacing-md)',
+            borderRadius: 'var(--radius-md)',
+            marginBottom: 'var(--spacing-md)',
+            color: 'var(--accent-blue)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--spacing-sm)'
+          }}>
+            <div className="spinner" style={{ width: 16, height: 16 }} />
+            {refreshStatus}
           </div>
         )}
 
@@ -201,25 +257,41 @@ export default function App() {
         </div>
 
         {/* Loading State */}
-        {loading && (
+        {loading && !refreshing && (
           <div className="loading">
             <div className="spinner" />
-            Loading...
+            Loading data...
           </div>
         )}
 
         {/* Content */}
         {!loading && (
           <>
+            {/* Empty State - No Data At All */}
+            {!hasData && !error && (
+              <div className="empty-state">
+                <h3 style={{ marginBottom: 'var(--spacing-sm)' }}>No data loaded</h3>
+                <p style={{ marginBottom: 'var(--spacing-md)', color: 'var(--text-secondary)' }}>
+                  Click "Refresh Data" to fetch live markets from Polymarket, or "Load Demo" to test the interface.
+                </p>
+                <div className="flex gap-sm" style={{ justifyContent: 'center' }}>
+                  <button className="btn btn-secondary" onClick={handleLoadDemo}>
+                    Load Demo
+                  </button>
+                  <button className="btn btn-primary" onClick={handleRefresh}>
+                    Refresh Data
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Markets Tab */}
-            {activeTab === TABS.MARKETS && (
+            {hasData && activeTab === TABS.MARKETS && (
               <div>
                 {markets.length === 0 ? (
                   <div className="empty-state">
-                    <p>No markets loaded yet.</p>
-                    <button className="btn btn-primary" onClick={handleLoadDemo}>
-                      Load Demo Data
-                    </button>
+                    <p>No markets found.</p>
+                    <p className="text-muted">Try adjusting filters or refreshing data.</p>
                   </div>
                 ) : (
                   markets.map(market => (
@@ -230,12 +302,12 @@ export default function App() {
             )}
 
             {/* Opportunities Tab */}
-            {activeTab === TABS.OPPORTUNITIES && (
+            {hasData && activeTab === TABS.OPPORTUNITIES && (
               <div>
                 {opportunities.length === 0 ? (
                   <div className="empty-state">
-                    <p>No opportunities detected yet.</p>
-                    <p className="text-muted">Load data to detect edges.</p>
+                    <p>No opportunities detected.</p>
+                    <p className="text-muted">Edge detection runs automatically when data is refreshed.</p>
                   </div>
                 ) : (
                   opportunities.map(opp => (
@@ -246,12 +318,12 @@ export default function App() {
             )}
 
             {/* Predictions Tab */}
-            {activeTab === TABS.PREDICTIONS && (
+            {hasData && activeTab === TABS.PREDICTIONS && (
               <div>
                 {predictions.length === 0 ? (
                   <div className="empty-state">
-                    <p>No predictions generated yet.</p>
-                    <p className="text-muted">Load data to run research agents.</p>
+                    <p>No predictions generated.</p>
+                    <p className="text-muted">Research agents analyze top markets during refresh.</p>
                   </div>
                 ) : (
                   predictions.map(pred => (
