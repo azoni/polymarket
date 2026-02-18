@@ -252,34 +252,31 @@ export default function App() {
         {/* Error Banner */}
         {error && (
           <div style={{
-            background: '#ffffff',
-            border: '2px solid',
-            borderColor: '#dfdfdf #404040 #404040 #dfdfdf',
-            padding: '4px 8px',
-            marginBottom: 8,
-            color: '#ff0000',
-            fontSize: 11,
-            fontFamily: 'Tahoma, Arial, sans-serif',
-            fontWeight: 'bold',
+            background: 'rgba(248, 113, 113, 0.08)',
+            border: '1px solid rgba(248, 113, 113, 0.2)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            marginBottom: 14,
+            color: '#f87171',
+            fontSize: 13,
           }}>
-            [Error] {error}
+            {error}
           </div>
         )}
 
         {/* Refresh Status Banner */}
         {refreshing && refreshStatus && (
           <div style={{
-            background: '#ffffff',
-            border: '2px solid',
-            borderColor: '#808080 #ffffff #ffffff #808080',
-            padding: '4px 8px',
-            marginBottom: 8,
-            color: '#000080',
+            background: 'rgba(96, 165, 250, 0.08)',
+            border: '1px solid rgba(96, 165, 250, 0.2)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            marginBottom: 14,
+            color: '#60a5fa',
             display: 'flex',
             alignItems: 'center',
-            gap: 4,
-            fontSize: 11,
-            fontFamily: 'Tahoma, Arial, sans-serif',
+            gap: 8,
+            fontSize: 13,
           }}>
             <div className="spinner" style={{ width: 14, height: 14 }} />
             {refreshStatus}

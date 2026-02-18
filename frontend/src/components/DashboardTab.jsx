@@ -75,11 +75,11 @@ export function DashboardTab({
           className="btn btn-primary"
           onClick={onScan}
           disabled={scanning || autoScanning}
-          style={{ flex: 1, justifyContent: 'center', padding: '4px 12px' }}
+          style={{ flex: 1, justifyContent: 'center' }}
         >
           {scanning ? (
             <>
-              <span className="spinner" style={{ width: 14, height: 14 }} />
+              <span className="spinner" style={{ width: 14, height: 14, marginRight: 6 }} />
               Scanning...
             </>
           ) : (
@@ -89,14 +89,14 @@ export function DashboardTab({
         <button
           className={`btn ${autoScanning ? 'btn-danger' : 'btn-secondary'}`}
           onClick={onAutoScanToggle}
-          style={{ minWidth: 140, justifyContent: 'center', padding: '4px 12px' }}
+          style={{ minWidth: 150, justifyContent: 'center' }}
         >
           {autoScanning ? 'Stop Auto-Scan' : 'Start Auto-Scan'}
         </button>
       </div>
       {autoScanning && (
         <div className="auto-scan-banner mb-md">
-          <span className="spinner" style={{ width: 12, height: 12 }} />
+          <span className="spinner" style={{ width: 14, height: 14 }} />
           Auto-scanning every {config?.scan_interval || 120}s
         </div>
       )}
@@ -155,9 +155,7 @@ export function DashboardTab({
         <div className="card">
           <div className="card-header">
             <h3>Balance History</h3>
-            <span style={{ fontSize: 10, color: '#c0c0c0' }}>
-              {history.length} snapshots
-            </span>
+            <span className="text-muted">{history.length} snapshots</span>
           </div>
           <div className="card-body chart-container">
             {chartData.length < 2 ? (
@@ -169,25 +167,25 @@ export function DashboardTab({
                 <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="balanceGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={pnl >= 0 ? '#000080' : '#ff0000'} stopOpacity={0.3} />
-                      <stop offset="95%" stopColor={pnl >= 0 ? '#000080' : '#ff0000'} stopOpacity={0} />
+                      <stop offset="5%" stopColor={pnl >= 0 ? '#34d399' : '#f87171'} stopOpacity={0.2} />
+                      <stop offset="95%" stopColor={pnl >= 0 ? '#34d399' : '#f87171'} stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="time" stroke="#808080" fontSize={10} tickLine={false} axisLine={false} fontFamily="Tahoma, Arial, sans-serif" />
+                  <XAxis dataKey="time" stroke="#5a5a5d" fontSize={11} tickLine={false} axisLine={false} fontFamily="Inter, system-ui, sans-serif" />
                   <YAxis
-                    stroke="#808080" fontSize={10} tickLine={false} axisLine={false}
+                    stroke="#5a5a5d" fontSize={11} tickLine={false} axisLine={false}
                     tickFormatter={v => `$${v.toLocaleString()}`}
                     domain={['dataMin - 50', 'dataMax + 50']}
-                    fontFamily="Tahoma, Arial, sans-serif"
+                    fontFamily="Inter, system-ui, sans-serif"
                   />
                   <Tooltip
-                    contentStyle={{ background: '#c0c0c0', border: '2px outset #c0c0c0', borderRadius: 0, fontFamily: 'Tahoma, Arial, sans-serif', fontSize: 11, color: '#000' }}
-                    labelStyle={{ color: '#404040' }}
+                    contentStyle={{ background: '#161618', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 8, fontFamily: 'Inter, system-ui, sans-serif', fontSize: 12, color: '#ececef', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}
+                    labelStyle={{ color: '#8b8b8e' }}
                     formatter={(value) => [`$${value.toLocaleString()}`, 'Balance']}
                   />
                   <Area
                     type="monotone" dataKey="balance"
-                    stroke={pnl >= 0 ? '#000080' : '#ff0000'}
+                    stroke={pnl >= 0 ? '#34d399' : '#f87171'}
                     fill="url(#balanceGrad)" strokeWidth={2}
                   />
                 </AreaChart>
@@ -207,7 +205,7 @@ export function DashboardTab({
               <span className={risk.daily_pnl >= 0 ? 'text-green' : 'text-red'}>
                 ${(risk.daily_pnl || 0).toFixed(2)}
               </span>
-              <span className="text-muted">
+              <span className="text-muted" style={{ marginLeft: 4 }}>
                 / {isUnlimitedVal(risk.daily_loss_limit) ? 'No limit' : `-$${risk.daily_loss_limit || 25}`}
               </span>
             </div>
@@ -219,7 +217,7 @@ export function DashboardTab({
                   style={{ width: `${Math.min(100, ((risk.total_exposure || 0) / (risk.max_exposure || 200)) * 100)}%` }}
                 />
               </div>
-              <span className="text-secondary">
+              <span className="text-secondary" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>
                 ${(risk.total_exposure || 0).toFixed(0)} / ${risk.max_exposure || 200}
               </span>
             </div>
@@ -231,13 +229,13 @@ export function DashboardTab({
                   style={{ width: `${Math.min(100, ((risk.open_positions || 0) / (risk.max_positions || 5)) * 100)}%` }}
                 />
               </div>
-              <span className="text-secondary">
+              <span className="text-secondary" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>
                 {risk.open_positions || 0} / {risk.max_positions || 5}
               </span>
             </div>
-            <div className="risk-row mt-sm">
+            <div className="risk-row" style={{ marginTop: 4 }}>
               <span className="risk-label">Trades Today</span>
-              <span className="value">{risk.trades_today || 0}</span>
+              <span style={{ fontWeight: 600 }}>{risk.trades_today || 0}</span>
             </div>
           </div>
         </div>
@@ -245,9 +243,7 @@ export function DashboardTab({
         <div className="card">
           <div className="card-header">
             <h3>Performance</h3>
-            <span style={{ fontSize: 10, color: '#c0c0c0' }}>
-              {perf.total_trades} trades
-            </span>
+            <span className="text-muted">{perf.total_trades} trades</span>
           </div>
           <div className="card-body">
             {perf.total_trades === 0 ? (
@@ -272,7 +268,7 @@ export function DashboardTab({
                 </div>
                 {Object.keys(perf.by_edge_type || {}).length > 0 && (
                   <div className="mt-md">
-                    <div className="text-muted" style={{ fontSize: 10, marginBottom: 4 }}>
+                    <div className="text-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
                       By Edge Type
                     </div>
                     {Object.entries(perf.by_edge_type).map(([type, data]) => (
@@ -296,9 +292,7 @@ export function DashboardTab({
         <div className="card">
           <div className="card-header">
             <h3>Active Positions</h3>
-            <span style={{ fontSize: 10, color: '#c0c0c0' }}>
-              {positionEntries.length} open
-            </span>
+            <span className="text-muted">{positionEntries.length} open</span>
           </div>
           <div className="card-body">
             <div className="positions-table">
@@ -310,7 +304,7 @@ export function DashboardTab({
                       <span className="position-market" title={info.market || tokenId}>
                         {info.market || `${tokenId.substring(0, 16)}...`}
                       </span>
-                      <span className="value">${(info.exposure || 0).toFixed(2)}</span>
+                      <span style={{ fontWeight: 600 }}>${(info.exposure || 0).toFixed(2)}</span>
                     </div>
                     <div className="position-card-meta">
                       {info.side && (
@@ -338,7 +332,7 @@ export function DashboardTab({
       <div className="card">
         <div className="card-header">
           <h3>Signals</h3>
-          <span style={{ fontSize: 10, color: '#c0c0c0' }}>{(signals || []).length} total</span>
+          <span className="text-muted">{(signals || []).length} total</span>
         </div>
         <div className="card-body" style={{ padding: 0 }}>
           {(signals || []).length === 0 ? (
@@ -429,8 +423,8 @@ export function DashboardTab({
           onClick={() => setSettingsOpen(!settingsOpen)}
         >
           <h3>Settings</h3>
-          <span style={{ fontSize: 10, color: '#c0c0c0' }}>
-            {settingsOpen ? '[-]' : '[+]'}
+          <span className="text-muted" style={{ fontSize: 12 }}>
+            {settingsOpen ? 'Hide' : 'Show'}
           </span>
         </div>
         {settingsOpen && config && (
