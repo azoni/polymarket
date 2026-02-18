@@ -386,6 +386,22 @@ a:hover {
   font-size: 0.875rem;
 }
 
+.wallet-balance {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+}
+
+.wallet-amount {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 .risk-row {
   display: flex;
   align-items: center;

@@ -276,4 +276,15 @@ class TradingBot:
             "balance_history": self.balance_history,
             "auto_scan": self._auto_scan,
             "performance": self.get_performance_stats(),
+            "wallet_balance": self._get_wallet_balance(),
         }
+
+    def _get_wallet_balance(self) -> dict:
+        """Get real wallet balance if connected."""
+        if not self.trader.is_connected:
+            return {"available": False, "balance": None}
+        try:
+            bal = self.trader.get_balance()
+            return {"available": True, "balance": round(bal, 2) if bal is not None else None}
+        except Exception:
+            return {"available": False, "balance": None}

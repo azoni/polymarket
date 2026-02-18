@@ -37,6 +37,7 @@ export function DashboardTab({ status, signals, stats, onTabChange }) {
   const history = status?.balance_history || [];
   const positions = risk.position_details || {};
   const perf = status?.performance || { total_trades: 0, total_cost: 0, avg_confidence: 0, by_edge_type: {} };
+  const wallet = status?.wallet_balance || { available: false, balance: null };
   const recentSignals = (signals || []).slice(0, 5);
 
   // Prepare chart data
@@ -79,6 +80,14 @@ export function DashboardTab({ status, signals, stats, onTabChange }) {
                 from ${balance.starting_balance?.toLocaleString()}
               </span>
             </div>
+            {wallet.balance != null && (
+              <div className="wallet-balance">
+                <span className="text-muted">Wallet:</span>
+                <span className="wallet-amount">
+                  ${wallet.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC
+                </span>
+              </div>
+            )}
             <div className="metrics mt-md">
               <div className="metric">
                 <span className="label">Daily P&L</span>

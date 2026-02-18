@@ -157,3 +157,11 @@ async def get_trade_history():
     if _bot is None:
         return []
     return list(reversed(_bot.trade_history))
+
+
+@trading_router.get("/wallet")
+async def get_wallet_balance():
+    """Get real Polymarket wallet USDC balance."""
+    if _bot is None:
+        return {"available": False, "balance": None}
+    return _bot._get_wallet_balance()
