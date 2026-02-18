@@ -233,8 +233,8 @@ export default function App() {
             </div>
           )}
           {stats?.last_updated && (
-            <span className="text-muted" style={{ fontSize: '0.75rem' }}>
-              Updated: {formatTime(stats.last_updated)}
+            <span className="text-muted" style={{ fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase' }}>
+              Last: {formatTime(stats.last_updated)}
             </span>
           )}
           <button
@@ -252,31 +252,36 @@ export default function App() {
         {/* Error Banner */}
         {error && (
           <div style={{
-            background: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid var(--accent-red)',
-            padding: 'var(--spacing-md)',
-            borderRadius: 'var(--radius-md)',
-            marginBottom: 'var(--spacing-md)',
-            color: 'var(--accent-red)'
+            background: 'rgba(255, 51, 51, 0.05)',
+            border: '1px solid var(--red-dim)',
+            padding: 'var(--sp-sm) var(--sp-md)',
+            marginBottom: 'var(--sp-md)',
+            color: 'var(--red)',
+            fontSize: '12px',
+            fontFamily: 'var(--font)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px',
           }}>
-            <strong>Error:</strong> {error}
+            [ERROR] {error}
           </div>
         )}
 
         {/* Refresh Status Banner */}
         {refreshing && refreshStatus && (
           <div style={{
-            background: 'rgba(59, 130, 246, 0.1)',
-            border: '1px solid var(--accent-blue)',
-            padding: 'var(--spacing-md)',
-            borderRadius: 'var(--radius-md)',
-            marginBottom: 'var(--spacing-md)',
-            color: 'var(--accent-blue)',
+            background: 'rgba(0, 212, 255, 0.05)',
+            border: '1px solid var(--cyan-dim)',
+            padding: 'var(--sp-sm) var(--sp-md)',
+            marginBottom: 'var(--sp-md)',
+            color: 'var(--cyan)',
             display: 'flex',
             alignItems: 'center',
-            gap: 'var(--spacing-sm)'
+            gap: 'var(--sp-sm)',
+            fontSize: '11px',
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
           }}>
-            <div className="spinner" style={{ width: 16, height: 16 }} />
+            <div className="spinner" style={{ width: 14, height: 14 }} />
             {refreshStatus}
           </div>
         )}

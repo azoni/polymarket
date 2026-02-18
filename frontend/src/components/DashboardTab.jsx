@@ -137,24 +137,25 @@ export function DashboardTab({
                 <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="balanceGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={pnl >= 0 ? '#22c55e' : '#ef4444'} stopOpacity={0.3} />
-                      <stop offset="95%" stopColor={pnl >= 0 ? '#22c55e' : '#ef4444'} stopOpacity={0} />
+                      <stop offset="5%" stopColor={pnl >= 0 ? '#00ff41' : '#ff3333'} stopOpacity={0.25} />
+                      <stop offset="95%" stopColor={pnl >= 0 ? '#00ff41' : '#ff3333'} stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="time" stroke="#666" fontSize={11} tickLine={false} axisLine={false} />
+                  <XAxis dataKey="time" stroke="#5c6370" fontSize={10} tickLine={false} axisLine={false} fontFamily="JetBrains Mono, monospace" />
                   <YAxis
-                    stroke="#666" fontSize={11} tickLine={false} axisLine={false}
+                    stroke="#5c6370" fontSize={10} tickLine={false} axisLine={false}
                     tickFormatter={v => `$${v.toLocaleString()}`}
                     domain={['dataMin - 50', 'dataMax + 50']}
+                    fontFamily="JetBrains Mono, monospace"
                   />
                   <Tooltip
-                    contentStyle={{ background: '#222', border: '1px solid #333', borderRadius: 6 }}
-                    labelStyle={{ color: '#aaa' }}
+                    contentStyle={{ background: '#0d1117', border: '1px solid #1b2838', borderRadius: 0, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}
+                    labelStyle={{ color: '#5c6370' }}
                     formatter={(value) => [`$${value.toLocaleString()}`, 'Balance']}
                   />
                   <Area
                     type="monotone" dataKey="balance"
-                    stroke={pnl >= 0 ? '#22c55e' : '#ef4444'}
+                    stroke={pnl >= 0 ? '#00ff41' : '#ff3333'}
                     fill="url(#balanceGrad)" strokeWidth={2}
                   />
                 </AreaChart>
