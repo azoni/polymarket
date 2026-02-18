@@ -11,6 +11,33 @@ from .config import TradingConfig, trading_config
 
 logger = logging.getLogger(__name__)
 
+PAPER_STARTING_BALANCE = 10_000.0
+
+
+class PaperAccount:
+    """Simulated account for paper trading. Starts at $10k."""
+
+    def __init__(self, starting_balance: float = PAPER_STARTING_BALANCE):
+        self.starting_balance = starting_balance
+        self.balance = starting_balance
+
+    def deduct(self, amount: float):
+        self.balance -= amount
+
+    def credit(self, amount: float):
+        self.balance += amount
+
+    @property
+    def pnl(self) -> float:
+        return self.balance - self.starting_balance
+
+    def to_dict(self) -> dict:
+        return {
+            "balance": round(self.balance, 2),
+            "starting_balance": self.starting_balance,
+            "pnl": round(self.pnl, 2),
+        }
+
 
 @dataclass
 class TradeRecord:
@@ -31,6 +58,7 @@ class RiskManager:
         self.trades_today: list[TradeRecord] = []
         self.open_positions: dict[str, float] = {}  # token_id -> $ exposure
         self._current_date: date = date.today()
+        self.paper_account = PaperAccount()
 
     def _reset_daily(self):
         """Reset daily counters if the date has changed."""
@@ -103,8 +131,10 @@ class RiskManager:
 
         if side == "BUY":
             self.open_positions[token_id] = self.open_positions.get(token_id, 0) + cost
+            self.paper_account.deduct(cost)
         elif side == "SELL":
             self.open_positions[token_id] = self.open_positions.get(token_id, 0) - cost
+            self.paper_account.credit(cost)
             if self.open_positions.get(token_id, 0) <= 0:
                 self.open_positions.pop(token_id, None)
 

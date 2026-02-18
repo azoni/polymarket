@@ -31,6 +31,9 @@ class TradingBot:
         self.strategy = TradingStrategy(self.trader, self.risk, self.config)
         self._running = False
         self._cycles = 0
+        self._scanning = False
+        self.signal_history: list[dict] = []  # last 100 signal results
+        self._last_scan_at: str = ""
 
     def start(self):
         """Start the bot loop."""
@@ -115,21 +118,54 @@ class TradingBot:
         self._running = False
 
     def run_once(self) -> list[dict]:
-        """Run a single scan cycle (useful for testing)."""
+        """Run a single scan cycle (useful for testing / API trigger)."""
         if self.config.has_credentials and not self.trader.is_connected:
             self.trader.connect()
 
-        signals = self.strategy.scan()
-        if signals:
-            return self.strategy.execute_signals(signals)
-        return []
+        self._scanning = True
+        self._cycles += 1
+        self._last_scan_at = datetime.now().isoformat()
+
+        try:
+            signals = self.strategy.scan()
+            results = self.strategy.execute_signals(signals) if signals else []
+
+            # Store signal history (capped at 100)
+            for i, sig in enumerate(signals):
+                entry = {
+                    "timestamp": self._last_scan_at,
+                    "cycle": self._cycles,
+                    "market": sig.market_question,
+                    "side": sig.side,
+                    "price": sig.price,
+                    "size": sig.size,
+                    "edge_type": sig.edge_type,
+                    "confidence": sig.confidence,
+                    "expected_return": sig.expected_return,
+                    "status": results[i]["status"] if i < len(results) else "unknown",
+                    "reason": results[i].get("reason", "") if i < len(results) else "",
+                }
+                self.signal_history.append(entry)
+
+            # Cap at 100
+            if len(self.signal_history) > 100:
+                self.signal_history = self.signal_history[-100:]
+
+            return results
+        finally:
+            self._scanning = False
 
     def get_status(self) -> dict:
-        """Get current bot status."""
+        """Get current bot status for the dashboard."""
+        risk = self.risk.get_status()
         return {
             "running": self._running,
-            "mode": "dry_run" if self.config.dry_run else "live",
+            "scanning": self._scanning,
+            "mode": "paper" if self.config.dry_run else "live",
             "cycles": self._cycles,
             "connected": self.trader.is_connected,
-            "risk": self.risk.get_status(),
+            "last_scan_at": self._last_scan_at,
+            "signal_count": len(self.signal_history),
+            "balance": self.risk.paper_account.to_dict(),
+            "risk": risk,
         }

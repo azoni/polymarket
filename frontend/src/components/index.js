@@ -4,3 +4,4 @@ export { OpportunityCard } from './OpportunityCard';
 export { PredictionCard } from './PredictionCard';
 export { ScoreBar } from './ScoreBar';
 export { AdBanner } from './AdBanner';
+export { TradingTab } from './TradingTab';

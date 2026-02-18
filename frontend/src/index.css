@@ -368,6 +368,91 @@ a:hover {
 .mt-md { margin-top: var(--spacing-md); }
 .mb-md { margin-bottom: var(--spacing-md); }
 
+/* Trading Tab */
+.trading-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.account-balance {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: var(--spacing-xs);
+}
+
+.account-pnl {
+  font-size: 0.875rem;
+}
+
+.risk-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+  font-size: 0.875rem;
+}
+
+.risk-label {
+  width: 90px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.progress-bar-container {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: 100px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--accent-blue);
+  border-radius: 100px;
+  transition: width 0.3s ease;
+}
+
+.progress-bar.green {
+  background: var(--accent-green);
+}
+
+/* Signals Table */
+.signals-table {
+  overflow-x: auto;
+}
+
+.signal-row {
+  display: grid;
+  grid-template-columns: 2fr 0.5fr 0.7fr 0.5fr 1fr 0.5fr 0.7fr;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  align-items: center;
+  font-size: 0.8125rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.signal-row:last-child {
+  border-bottom: none;
+}
+
+.signal-header {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: var(--bg-secondary);
+  font-weight: 500;
+}
+
+.signal-market {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .main {
@@ -381,5 +466,18 @@ a:hover {
   .data-row {
     grid-template-columns: 1fr;
     gap: var(--spacing-sm);
+  }
+
+  .trading-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .signal-row {
+    grid-template-columns: 2fr 0.5fr 0.7fr 0.7fr;
+  }
+
+  .signal-row span:nth-child(5),
+  .signal-row span:nth-child(6) {
+    display: none;
   }
 }

@@ -125,3 +125,24 @@ export async function refreshData({ maxMarkets, minVolume, fetchOrderbooks } = {
 export async function loadDemoData() {
   return request('/load-demo', { method: 'POST' });
 }
+
+/**
+ * Get trading bot status (balance, risk, mode).
+ */
+export async function getTradingStatus() {
+  return request('/trading/status');
+}
+
+/**
+ * Get recent trade signals.
+ */
+export async function getTradingSignals() {
+  return request('/trading/signals');
+}
+
+/**
+ * Trigger a manual scan cycle.
+ */
+export async function triggerScan() {
+  return request('/trading/scan', { method: 'POST' });
+}

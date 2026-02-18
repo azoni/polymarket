@@ -12,6 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 from api import router
+from api.trading_routes import trading_router, set_bot
+from trading.bot import TradingBot
 
 # Configure logging
 logging.basicConfig(
@@ -52,6 +54,11 @@ app.add_middleware(
 
 # Include routes
 app.include_router(router, prefix="/api")
+app.include_router(trading_router, prefix="/api")
+
+# Create global trading bot instance (paper mode by default)
+bot = TradingBot()
+set_bot(bot)
 
 
 @app.get("/")

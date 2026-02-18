@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { StatCard, MarketCard, OpportunityCard, PredictionCard } from './components';
+import { StatCard, MarketCard, OpportunityCard, PredictionCard, TradingTab } from './components';
 import * as api from './api/client';
 
 // Tab options
@@ -12,6 +12,7 @@ const TABS = {
   MARKETS: 'markets',
   OPPORTUNITIES: 'opportunities',
   PREDICTIONS: 'predictions',
+  TRADING: 'trading',
 };
 
 export default function App() {
@@ -25,6 +26,40 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState('');
   const [error, setError] = useState(null);
+
+  // Trading state
+  const [tradingStatus, setTradingStatus] = useState(null);
+  const [tradingSignals, setTradingSignals] = useState([]);
+  const [scanning, setScanning] = useState(false);
+
+  // Fetch trading data
+  const fetchTradingData = useCallback(async () => {
+    try {
+      const [status, signals] = await Promise.all([
+        api.getTradingStatus(),
+        api.getTradingSignals(),
+      ]);
+      setTradingStatus(status);
+      setTradingSignals(signals);
+    } catch (err) {
+      console.error('[fetchTradingData] Error:', err);
+    }
+  }, []);
+
+  // Handle scan trigger
+  const handleScan = async () => {
+    try {
+      setScanning(true);
+      setError(null);
+      await api.triggerScan();
+      await fetchTradingData();
+    } catch (err) {
+      console.error('[handleScan] Error:', err);
+      setError(err.message);
+    } finally {
+      setScanning(false);
+    }
+  };
 
   // Fetch all data
   const fetchData = useCallback(async () => {
@@ -62,7 +97,8 @@ export default function App() {
   // Initial load
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+    fetchTradingData();
+  }, [fetchData, fetchTradingData]);
 
   // Load demo data
   const handleLoadDemo = async () => {
@@ -248,11 +284,17 @@ export default function App() {
           >
             Opportunities ({opportunities.length})
           </button>
-          <button 
+          <button
             className={`tab ${activeTab === TABS.PREDICTIONS ? 'active' : ''}`}
             onClick={() => setActiveTab(TABS.PREDICTIONS)}
           >
             Predictions ({predictions.length})
+          </button>
+          <button
+            className={`tab ${activeTab === TABS.TRADING ? 'active' : ''}`}
+            onClick={() => { setActiveTab(TABS.TRADING); fetchTradingData(); }}
+          >
+            Trading
           </button>
         </div>
 
@@ -331,6 +373,16 @@ export default function App() {
                   ))
                 )}
               </div>
+            )}
+
+            {/* Trading Tab */}
+            {activeTab === TABS.TRADING && (
+              <TradingTab
+                status={tradingStatus}
+                signals={tradingSignals}
+                scanning={scanning}
+                onScan={handleScan}
+              />
             )}
           </>
         )}
