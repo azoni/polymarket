@@ -30,6 +30,10 @@ class TradeSignal:
     confidence: float
     expected_return: float
     reasoning: str
+    risk_level: str = ""
+    suggested_action: str = ""
+    market_id: str = ""
+    description: str = ""
 
 
 class TradingStrategy:
@@ -131,6 +135,10 @@ class TradingStrategy:
             confidence=opp.confidence,
             expected_return=opp.expected_return,
             reasoning=opp.reasoning,
+            risk_level=opp.risk_level,
+            suggested_action=opp.suggested_action,
+            market_id=opp.market_id,
+            description=opp.description,
         )
 
     def _pick_trade(

@@ -1,8 +1,10 @@
 """
-Trading API — bot status, signals, and scan trigger.
+Trading API — bot status, signals, scan trigger, and config management.
 """
 
 from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -52,3 +54,69 @@ async def trigger_scan():
         "signal_count": len(results),
         "balance": _bot.risk.paper_account.to_dict(),
     }
+
+
+@trading_router.post("/reset")
+async def reset_balance():
+    """Reset paper account to starting balance and clear all state."""
+    if _bot is None:
+        return {"error": "Trading bot not initialized"}
+
+    starting = _bot.risk.paper_account.starting_balance
+
+    _bot.risk.paper_account.balance = starting
+    _bot.risk.open_positions.clear()
+    _bot.risk.trades_today.clear()
+    _bot.risk._day_start_balance = starting
+    _bot.signal_history.clear()
+    _bot.balance_history.clear()
+    _bot._cycles = 0
+
+    logger.info("Paper account reset to $%.2f", starting)
+    return {"status": "ok", "balance": _bot.risk.paper_account.to_dict()}
+
+
+# --- Config endpoints ---
+
+# Safe fields exposed to the UI (no secrets)
+_CONFIG_FIELDS = [
+    "dry_run", "max_position_size", "max_daily_loss", "max_total_exposure",
+    "max_open_orders", "min_confidence", "min_expected_return", "min_liquidity",
+    "scan_interval",
+]
+
+
+class ConfigUpdate(BaseModel):
+    dry_run: Optional[bool] = None
+    max_position_size: Optional[float] = None
+    max_daily_loss: Optional[float] = None
+    max_total_exposure: Optional[float] = None
+    max_open_orders: Optional[int] = None
+    min_confidence: Optional[float] = None
+    min_expected_return: Optional[float] = None
+    min_liquidity: Optional[float] = None
+    scan_interval: Optional[int] = None
+
+
+@trading_router.get("/config")
+async def get_config():
+    """Return safe (non-secret) config fields."""
+    if _bot is None:
+        return {"error": "Trading bot not initialized"}
+    return {k: getattr(_bot.config, k) for k in _CONFIG_FIELDS}
+
+
+@trading_router.put("/config")
+async def update_config(update: ConfigUpdate):
+    """Partial update of config fields. Only provided fields change."""
+    if _bot is None:
+        return {"error": "Trading bot not initialized"}
+
+    changes = update.model_dump(exclude_none=True)
+    for key, value in changes.items():
+        if key in _CONFIG_FIELDS:
+            old = getattr(_bot.config, key)
+            setattr(_bot.config, key, value)
+            logger.info(f"Config updated: {key} = {old} -> {value}")
+
+    return {k: getattr(_bot.config, k) for k in _CONFIG_FIELDS}

@@ -1,25 +1,22 @@
 /**
- * Polymarket Edge Finder
+ * Polymarket Trading Platform
  * Main application component.
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import { StatCard, MarketCard, OpportunityCard, PredictionCard, TradingTab } from './components';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { StatCard, TradingTab, DashboardTab, ScannerTab } from './components';
 import * as api from './api/client';
 
-// Tab options
 const TABS = {
-  MARKETS: 'markets',
-  OPPORTUNITIES: 'opportunities',
-  PREDICTIONS: 'predictions',
+  DASHBOARD: 'dashboard',
+  SCANNER: 'scanner',
   TRADING: 'trading',
 };
 
 export default function App() {
   // State
-  const [activeTab, setActiveTab] = useState(TABS.MARKETS);
+  const [activeTab, setActiveTab] = useState(TABS.DASHBOARD);
   const [stats, setStats] = useState(null);
-  const [markets, setMarkets] = useState([]);
   const [opportunities, setOpportunities] = useState([]);
   const [predictions, setPredictions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -30,21 +27,40 @@ export default function App() {
   // Trading state
   const [tradingStatus, setTradingStatus] = useState(null);
   const [tradingSignals, setTradingSignals] = useState([]);
+  const [tradingConfig, setTradingConfig] = useState(null);
   const [scanning, setScanning] = useState(false);
+
+  // Auto-refresh interval ref
+  const autoRefreshRef = useRef(null);
 
   // Fetch trading data
   const fetchTradingData = useCallback(async () => {
     try {
-      const [status, signals] = await Promise.all([
+      const [status, signals, config] = await Promise.all([
         api.getTradingStatus(),
         api.getTradingSignals(),
+        api.getTradingConfig(),
       ]);
       setTradingStatus(status);
       setTradingSignals(signals);
+      setTradingConfig(config);
     } catch (err) {
       console.error('[fetchTradingData] Error:', err);
     }
   }, []);
+
+  // Handle config change from Trading settings
+  const handleConfigChange = async (updates) => {
+    try {
+      const updated = await api.updateTradingConfig(updates);
+      setTradingConfig(updated);
+      const status = await api.getTradingStatus();
+      setTradingStatus(status);
+    } catch (err) {
+      console.error('[handleConfigChange] Error:', err);
+      setError(err.message);
+    }
+  };
 
   // Handle scan trigger
   const handleScan = async () => {
@@ -61,29 +77,31 @@ export default function App() {
     }
   };
 
-  // Fetch all data
+  // Handle balance reset
+  const handleReset = async () => {
+    try {
+      setError(null);
+      await api.resetBalance();
+      await fetchTradingData();
+    } catch (err) {
+      console.error('[handleReset] Error:', err);
+      setError(err.message);
+    }
+  };
+
+  // Fetch core data (stats, opportunities, predictions)
   const fetchData = useCallback(async () => {
-    console.log('[fetchData] Starting data fetch...');
     try {
       setLoading(true);
       setError(null);
-      
-      const [statsData, marketsData, oppsData, predsData] = await Promise.all([
+
+      const [statsData, oppsData, predsData] = await Promise.all([
         api.getStats(),
-        api.getMarkets({ limit: 50 }),
-        api.getOpportunities({ limit: 50 }),
-        api.getPredictions({ limit: 50 }),
+        api.getOpportunities({ limit: 200 }),
+        api.getPredictions({ limit: 200 }),
       ]);
-      
-      console.log('[fetchData] Results:', {
-        stats: statsData,
-        markets: marketsData.length,
-        opportunities: oppsData.length,
-        predictions: predsData.length
-      });
-      
+
       setStats(statsData);
-      setMarkets(marketsData);
       setOpportunities(oppsData);
       setPredictions(predsData);
     } catch (err) {
@@ -100,56 +118,47 @@ export default function App() {
     fetchTradingData();
   }, [fetchData, fetchTradingData]);
 
-  // Load demo data
-  const handleLoadDemo = async () => {
-    console.log('[handleLoadDemo] Loading demo data...');
-    try {
-      setLoading(true);
-      setError(null);
-      const result = await api.loadDemoData();
-      console.log('[handleLoadDemo] Result:', result);
-      await fetchData();
-    } catch (err) {
-      console.error('[handleLoadDemo] Error:', err);
-      setError(err.message);
-      setLoading(false);
+  // Auto-refresh every 15 seconds on Dashboard or Trading tabs
+  useEffect(() => {
+    if (activeTab === TABS.DASHBOARD || activeTab === TABS.TRADING) {
+      autoRefreshRef.current = setInterval(() => {
+        fetchTradingData();
+      }, 15000);
     }
-  };
+    return () => {
+      if (autoRefreshRef.current) {
+        clearInterval(autoRefreshRef.current);
+        autoRefreshRef.current = null;
+      }
+    };
+  }, [activeTab, fetchTradingData]);
 
   // Refresh from Polymarket
   const handleRefresh = async () => {
-    console.log('[handleRefresh] Starting refresh...');
     try {
       setRefreshing(true);
       setRefreshStatus('Starting refresh...');
       setError(null);
-      
-      const result = await api.refreshData({ maxMarkets: 100, minVolume: 1000 });
-      console.log('[handleRefresh] Refresh started:', result);
+
+      await api.refreshData({ maxMarkets: 100, minVolume: 1000 });
       setRefreshStatus('Fetching markets from Polymarket...');
-      
-      // Poll for completion
+
       let pollCount = 0;
-      const maxPolls = 60; // 2 minutes max
-      
+      const maxPolls = 60;
+
       const pollInterval = setInterval(async () => {
         pollCount++;
         try {
           const status = await api.getStatus();
-          console.log(`[handleRefresh] Poll ${pollCount}:`, status);
-          
           if (status.markets_loaded > 0) {
             setRefreshStatus(`Processing ${status.markets_loaded} markets...`);
           }
-          
           if (!status.is_loading) {
-            console.log('[handleRefresh] Refresh complete');
             clearInterval(pollInterval);
             setRefreshing(false);
             setRefreshStatus('');
             await fetchData();
           } else if (pollCount >= maxPolls) {
-            console.warn('[handleRefresh] Polling timeout');
             clearInterval(pollInterval);
             setRefreshing(false);
             setRefreshStatus('');
@@ -157,7 +166,6 @@ export default function App() {
             await fetchData();
           }
         } catch (err) {
-          console.error('[handleRefresh] Poll error:', err);
           clearInterval(pollInterval);
           setRefreshing(false);
           setRefreshStatus('');
@@ -165,38 +173,30 @@ export default function App() {
         }
       }, 2000);
     } catch (err) {
-      console.error('[handleRefresh] Error:', err);
       setRefreshing(false);
       setRefreshStatus('');
       setError(err.message);
     }
   };
 
-  // Format last updated time
   const formatTime = (dateStr) => {
     if (!dateStr) return 'Never';
-    const date = new Date(dateStr);
-    return date.toLocaleTimeString();
+    return new Date(dateStr).toLocaleTimeString();
   };
-
-  // Check if we have data
-  const hasData = markets.length > 0 || opportunities.length > 0 || predictions.length > 0;
 
   return (
     <div className="app">
       {/* Header */}
       <header className="header">
-        <h1>Polymarket Edge Finder</h1>
-        <div className="flex gap-sm">
-          <button 
-            className="btn btn-secondary" 
-            onClick={handleLoadDemo}
-            disabled={loading || refreshing}
-          >
-            Load Demo
-          </button>
-          <button 
-            className="btn btn-primary" 
+        <h1>Polymarket Trading Platform</h1>
+        <div className="flex gap-sm items-center">
+          {stats?.last_updated && (
+            <span className="text-muted" style={{ fontSize: '0.75rem' }}>
+              Updated: {formatTime(stats.last_updated)}
+            </span>
+          )}
+          <button
+            className="btn btn-primary"
             onClick={handleRefresh}
             disabled={loading || refreshing}
           >
@@ -209,8 +209,8 @@ export default function App() {
       <main className="main">
         {/* Error Banner */}
         {error && (
-          <div style={{ 
-            background: 'rgba(239, 68, 68, 0.1)', 
+          <div style={{
+            background: 'rgba(239, 68, 68, 0.1)',
             border: '1px solid var(--accent-red)',
             padding: 'var(--spacing-md)',
             borderRadius: 'var(--radius-md)',
@@ -223,8 +223,8 @@ export default function App() {
 
         {/* Refresh Status Banner */}
         {refreshing && refreshStatus && (
-          <div style={{ 
-            background: 'rgba(59, 130, 246, 0.1)', 
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.1)',
             border: '1px solid var(--accent-blue)',
             padding: 'var(--spacing-md)',
             borderRadius: 'var(--radius-md)',
@@ -241,54 +241,25 @@ export default function App() {
 
         {/* Stats Grid */}
         <div className="stats-grid">
-          <StatCard 
-            label="Total Markets" 
-            value={stats?.total_markets || 0} 
-            color="blue" 
-          />
-          <StatCard 
-            label="Opportunities" 
-            value={stats?.total_opportunities || 0} 
-            color="green" 
-          />
-          <StatCard 
-            label="High Confidence" 
-            value={stats?.high_confidence_opps || 0} 
-            color="yellow" 
-          />
-          <StatCard 
-            label="Predictions" 
-            value={stats?.total_predictions || 0} 
-            color="purple" 
-          />
+          <StatCard label="Markets" value={stats?.total_markets || 0} color="blue" />
+          <StatCard label="Edges Found" value={stats?.total_opportunities || 0} color="green" />
+          <StatCard label="High Confidence" value={stats?.high_confidence_opps || 0} color="yellow" />
+          <StatCard label="Signals" value={tradingStatus?.signal_count || 0} color="purple" />
         </div>
-
-        {/* Last Updated */}
-        {stats?.last_updated && (
-          <div className="text-muted mb-md" style={{ fontSize: '0.875rem' }}>
-            Last updated: {formatTime(stats.last_updated)}
-          </div>
-        )}
 
         {/* Tabs */}
         <div className="tabs">
-          <button 
-            className={`tab ${activeTab === TABS.MARKETS ? 'active' : ''}`}
-            onClick={() => setActiveTab(TABS.MARKETS)}
+          <button
+            className={`tab ${activeTab === TABS.DASHBOARD ? 'active' : ''}`}
+            onClick={() => { setActiveTab(TABS.DASHBOARD); fetchTradingData(); }}
           >
-            Markets ({markets.length})
-          </button>
-          <button 
-            className={`tab ${activeTab === TABS.OPPORTUNITIES ? 'active' : ''}`}
-            onClick={() => setActiveTab(TABS.OPPORTUNITIES)}
-          >
-            Opportunities ({opportunities.length})
+            Dashboard
           </button>
           <button
-            className={`tab ${activeTab === TABS.PREDICTIONS ? 'active' : ''}`}
-            onClick={() => setActiveTab(TABS.PREDICTIONS)}
+            className={`tab ${activeTab === TABS.SCANNER ? 'active' : ''}`}
+            onClick={() => setActiveTab(TABS.SCANNER)}
           >
-            Predictions ({predictions.length})
+            Scanner
           </button>
           <button
             className={`tab ${activeTab === TABS.TRADING ? 'active' : ''}`}
@@ -309,70 +280,25 @@ export default function App() {
         {/* Content */}
         {!loading && (
           <>
-            {/* Empty State - No Data At All */}
-            {!hasData && !error && (
-              <div className="empty-state">
-                <h3 style={{ marginBottom: 'var(--spacing-sm)' }}>No data loaded</h3>
-                <p style={{ marginBottom: 'var(--spacing-md)', color: 'var(--text-secondary)' }}>
-                  Click "Refresh Data" to fetch live markets from Polymarket, or "Load Demo" to test the interface.
-                </p>
-                <div className="flex gap-sm" style={{ justifyContent: 'center' }}>
-                  <button className="btn btn-secondary" onClick={handleLoadDemo}>
-                    Load Demo
-                  </button>
-                  <button className="btn btn-primary" onClick={handleRefresh}>
-                    Refresh Data
-                  </button>
-                </div>
-              </div>
+            {/* Dashboard Tab */}
+            {activeTab === TABS.DASHBOARD && (
+              <DashboardTab
+                status={tradingStatus}
+                signals={tradingSignals}
+                stats={stats}
+                onTabChange={(tab) => {
+                  setActiveTab(tab);
+                  if (tab === TABS.TRADING) fetchTradingData();
+                }}
+              />
             )}
 
-            {/* Markets Tab */}
-            {hasData && activeTab === TABS.MARKETS && (
-              <div>
-                {markets.length === 0 ? (
-                  <div className="empty-state">
-                    <p>No markets found.</p>
-                    <p className="text-muted">Try adjusting filters or refreshing data.</p>
-                  </div>
-                ) : (
-                  markets.map(market => (
-                    <MarketCard key={market.market_id} market={market} />
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* Opportunities Tab */}
-            {hasData && activeTab === TABS.OPPORTUNITIES && (
-              <div>
-                {opportunities.length === 0 ? (
-                  <div className="empty-state">
-                    <p>No opportunities detected.</p>
-                    <p className="text-muted">Edge detection runs automatically when data is refreshed.</p>
-                  </div>
-                ) : (
-                  opportunities.map(opp => (
-                    <OpportunityCard key={opp.id} opportunity={opp} />
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* Predictions Tab */}
-            {hasData && activeTab === TABS.PREDICTIONS && (
-              <div>
-                {predictions.length === 0 ? (
-                  <div className="empty-state">
-                    <p>No predictions generated.</p>
-                    <p className="text-muted">Research agents analyze top markets during refresh.</p>
-                  </div>
-                ) : (
-                  predictions.map(pred => (
-                    <PredictionCard key={pred.market_id} prediction={pred} />
-                  ))
-                )}
-              </div>
+            {/* Scanner Tab */}
+            {activeTab === TABS.SCANNER && (
+              <ScannerTab
+                opportunities={opportunities}
+                predictions={predictions}
+              />
             )}
 
             {/* Trading Tab */}
@@ -382,6 +308,9 @@ export default function App() {
                 signals={tradingSignals}
                 scanning={scanning}
                 onScan={handleScan}
+                config={tradingConfig}
+                onConfigChange={handleConfigChange}
+                onReset={handleReset}
               />
             )}
           </>

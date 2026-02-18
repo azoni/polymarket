@@ -59,6 +59,7 @@ class RiskManager:
         self.open_positions: dict[str, float] = {}  # token_id -> $ exposure
         self._current_date: date = date.today()
         self.paper_account = PaperAccount()
+        self._day_start_balance: float = self.paper_account.balance
 
     def _reset_daily(self):
         """Reset daily counters if the date has changed."""
@@ -66,13 +67,14 @@ class RiskManager:
         if today != self._current_date:
             logger.info(f"New trading day: {today}. Resetting daily counters.")
             self.trades_today.clear()
+            self._day_start_balance = self.paper_account.balance
             self._current_date = today
 
     @property
     def daily_pnl(self) -> float:
-        """Sum of realized P&L today."""
+        """Today's P&L based on paper account balance delta."""
         self._reset_daily()
-        return sum(t.pnl for t in self.trades_today)
+        return self.paper_account.balance - self._day_start_balance
 
     @property
     def total_exposure(self) -> float:
@@ -152,4 +154,5 @@ class RiskManager:
             "open_positions": self.open_order_count,
             "max_positions": self.config.max_open_orders,
             "trades_today": len(self.trades_today),
+            "position_details": {k: round(v, 2) for k, v in self.open_positions.items()},
         }

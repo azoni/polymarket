@@ -27,7 +27,6 @@ class EdgeType(str, Enum):
     """Types of trading edges we can detect."""
     ARBITRAGE = "arbitrage"
     MISPRICING = "mispricing"
-    CORRELATION = "correlation"
     VOLUME_SIGNAL = "volume_signal"
     LIQUIDITY_GAP = "liquidity_gap"
 

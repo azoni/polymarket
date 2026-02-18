@@ -33,6 +33,7 @@ class TradingBot:
         self._cycles = 0
         self._scanning = False
         self.signal_history: list[dict] = []  # last 100 signal results
+        self.balance_history: list[dict] = []  # balance snapshots for P&L chart
         self._last_scan_at: str = ""
 
     def start(self):
@@ -142,6 +143,11 @@ class TradingBot:
                     "edge_type": sig.edge_type,
                     "confidence": sig.confidence,
                     "expected_return": sig.expected_return,
+                    "reasoning": sig.reasoning,
+                    "risk_level": sig.risk_level,
+                    "suggested_action": sig.suggested_action,
+                    "market_id": sig.market_id,
+                    "description": sig.description,
                     "status": results[i]["status"] if i < len(results) else "unknown",
                     "reason": results[i].get("reason", "") if i < len(results) else "",
                 }
@@ -150,6 +156,16 @@ class TradingBot:
             # Cap at 100
             if len(self.signal_history) > 100:
                 self.signal_history = self.signal_history[-100:]
+
+            # Snapshot balance for P&L chart
+            pa = self.risk.paper_account
+            self.balance_history.append({
+                "timestamp": self._last_scan_at,
+                "balance": round(pa.balance, 2),
+                "pnl": round(pa.pnl, 2),
+            })
+            if len(self.balance_history) > 500:
+                self.balance_history = self.balance_history[-500:]
 
             return results
         finally:
@@ -168,4 +184,5 @@ class TradingBot:
             "signal_count": len(self.signal_history),
             "balance": self.risk.paper_account.to_dict(),
             "risk": risk,
+            "balance_history": self.balance_history,
         }

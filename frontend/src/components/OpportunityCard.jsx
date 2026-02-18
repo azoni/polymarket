@@ -6,7 +6,6 @@
 const EDGE_TYPE_LABELS = {
   arbitrage: { label: 'Arbitrage', color: 'green' },
   mispricing: { label: 'Mispricing', color: 'yellow' },
-  correlation: { label: 'Correlation', color: 'blue' },
   volume_signal: { label: 'Volume Signal', color: 'purple' },
   liquidity_gap: { label: 'Liquidity Gap', color: 'blue' },
 };

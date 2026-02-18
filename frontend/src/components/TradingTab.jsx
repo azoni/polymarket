@@ -1,12 +1,50 @@
 /**
- * TradingTab — trading dashboard showing account, risk, signals, and controls.
+ * TradingTab — trading dashboard with settings, risk, and expandable signal details.
  */
 
-export function TradingTab({ status, signals, scanning, onScan }) {
+import { useState, useEffect } from 'react';
+
+const EDGE_TYPE_LABELS = {
+  arbitrage: { label: 'Arbitrage', color: 'green' },
+  mispricing: { label: 'Mispricing', color: 'yellow' },
+  volume_signal: { label: 'Volume Signal', color: 'purple' },
+  liquidity_gap: { label: 'Liquidity Gap', color: 'blue' },
+};
+
+const RISK_COLORS = {
+  low: 'green',
+  medium: 'yellow',
+  high: 'red',
+};
+
+const UNLIMITED = 999999;
+
+export function TradingTab({ status, signals, scanning, onScan, config, onConfigChange, onReset }) {
   const balance = status?.balance || { balance: 10000, starting_balance: 10000, pnl: 0 };
   const risk = status?.risk || {};
   const mode = status?.mode || 'paper';
   const pnl = balance.pnl || 0;
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [expandedSignal, setExpandedSignal] = useState(null);
+
+  const handleModeToggle = () => {
+    if (config?.dry_run) {
+      if (window.confirm('Switch to LIVE trading? Real money will be used.')) {
+        onConfigChange({ dry_run: false });
+      }
+    } else {
+      onConfigChange({ dry_run: true });
+    }
+  };
+
+  const handleReset = () => {
+    if (window.confirm('Reset paper account to $10,000? This clears all positions, signals, and P&L history.')) {
+      onReset();
+    }
+  };
+
+  const isUnlimitedVal = (val) => val >= UNLIMITED;
 
   return (
     <div className="trading-tab">
@@ -16,8 +54,8 @@ export function TradingTab({ status, signals, scanning, onScan }) {
         <div className="card">
           <div className="card-header">
             <h3>Account</h3>
-            <span className={`badge ${mode === 'paper' ? 'yellow' : 'green'}`}>
-              {mode === 'paper' ? 'Paper' : 'Live'}
+            <span className={`badge ${mode === 'paper' ? 'yellow' : 'red'}`}>
+              {mode === 'paper' ? 'Paper' : 'LIVE'}
             </span>
           </div>
           <div className="card-body">
@@ -50,6 +88,13 @@ export function TradingTab({ status, signals, scanning, onScan }) {
                 </span>
               </div>
             </div>
+            <button
+              className="btn btn-secondary mt-md"
+              onClick={handleReset}
+              style={{ width: '100%', justifyContent: 'center' }}
+            >
+              Reset Balance
+            </button>
           </div>
         </div>
 
@@ -59,16 +104,15 @@ export function TradingTab({ status, signals, scanning, onScan }) {
             <h3>Risk</h3>
           </div>
           <div className="card-body">
-            {/* Daily P&L */}
             <div className="risk-row">
               <span className="risk-label">Daily P&L</span>
               <span className={risk.daily_pnl >= 0 ? 'text-green' : 'text-red'}>
                 ${(risk.daily_pnl || 0).toFixed(2)}
               </span>
-              <span className="text-muted">/ -${risk.daily_loss_limit || 25}</span>
+              <span className="text-muted">
+                / {isUnlimitedVal(risk.daily_loss_limit) ? 'No limit' : `-$${risk.daily_loss_limit || 25}`}
+              </span>
             </div>
-
-            {/* Exposure */}
             <div className="risk-row">
               <span className="risk-label">Exposure</span>
               <div className="progress-bar-container">
@@ -83,8 +127,6 @@ export function TradingTab({ status, signals, scanning, onScan }) {
                 ${(risk.total_exposure || 0).toFixed(0)} / ${risk.max_exposure || 200}
               </span>
             </div>
-
-            {/* Positions */}
             <div className="risk-row">
               <span className="risk-label">Positions</span>
               <div className="progress-bar-container">
@@ -99,14 +141,94 @@ export function TradingTab({ status, signals, scanning, onScan }) {
                 {risk.open_positions || 0} / {risk.max_positions || 5}
               </span>
             </div>
-
-            {/* Trades today */}
             <div className="risk-row mt-sm">
               <span className="risk-label">Trades Today</span>
               <span className="value">{risk.trades_today || 0}</span>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Settings Panel */}
+      <div className="card settings-card">
+        <div
+          className="card-header"
+          style={{ cursor: 'pointer' }}
+          onClick={() => setSettingsOpen(!settingsOpen)}
+        >
+          <h3>Settings</h3>
+          <span className="text-muted" style={{ fontSize: '0.875rem' }}>
+            {settingsOpen ? 'Collapse' : 'Expand'}
+          </span>
+        </div>
+        {settingsOpen && config && (
+          <div className="card-body">
+            {/* Mode Toggle */}
+            <div className="setting-row">
+              <span className="setting-label">Trading Mode</span>
+              <div className="setting-input-group">
+                <button
+                  className={`btn ${config.dry_run ? 'btn-secondary' : 'btn-danger'}`}
+                  onClick={handleModeToggle}
+                  style={{ minWidth: 120 }}
+                >
+                  {config.dry_run ? 'Paper Mode' : 'LIVE MODE'}
+                </button>
+              </div>
+            </div>
+
+            {/* Settings with number inputs */}
+            <SettingInput
+              label="Max Position"
+              value={config.max_position_size}
+              min={10} step={10}
+              prefix="$"
+              onChange={v => onConfigChange({ max_position_size: v })}
+            />
+            <SettingInput
+              label="Max Daily Loss"
+              value={config.max_daily_loss}
+              min={5} step={5}
+              prefix="$"
+              unlimited
+              onChange={v => onConfigChange({ max_daily_loss: v })}
+            />
+            <SettingInput
+              label="Max Exposure"
+              value={config.max_total_exposure}
+              min={50} step={25}
+              prefix="$"
+              onChange={v => onConfigChange({ max_total_exposure: v })}
+            />
+            <SettingInput
+              label="Max Open Positions"
+              value={config.max_open_orders}
+              min={1} step={1}
+              onChange={v => onConfigChange({ max_open_orders: v })}
+            />
+            <SettingInput
+              label="Min Confidence"
+              value={config.min_confidence}
+              min={10} step={5}
+              suffix="%"
+              onChange={v => onConfigChange({ min_confidence: v })}
+            />
+            <SettingInput
+              label="Min Expected Return"
+              value={config.min_expected_return}
+              min={0.5} step={0.5}
+              suffix="%"
+              onChange={v => onConfigChange({ min_expected_return: v })}
+            />
+            <SettingInput
+              label="Scan Interval"
+              value={config.scan_interval}
+              min={10} step={10}
+              suffix="s"
+              onChange={v => onConfigChange({ scan_interval: v })}
+            />
+          </div>
+        )}
       </div>
 
       {/* Scan button */}
@@ -150,26 +272,152 @@ export function TradingTab({ status, signals, scanning, onScan }) {
                 <span>Conf</span>
                 <span>Status</span>
               </div>
-              {signals.map((sig, i) => (
-                <div className="signal-row" key={i}>
-                  <span className="signal-market" title={sig.market}>
-                    {sig.market?.substring(0, 50)}{sig.market?.length > 50 ? '...' : ''}
-                  </span>
-                  <span className={sig.side === 'BUY' ? 'text-green' : 'text-red'}>
-                    {sig.side}
-                  </span>
-                  <span>${sig.price?.toFixed(3)}</span>
-                  <span>{sig.size}</span>
-                  <span className="badge gray">{sig.edge_type}</span>
-                  <span>{sig.confidence?.toFixed(0)}%</span>
-                  <span>
-                    <StatusBadge status={sig.status} />
-                  </span>
-                </div>
-              ))}
+              {signals.map((sig, i) => {
+                const isExpanded = expandedSignal === i;
+                const edgeInfo = EDGE_TYPE_LABELS[sig.edge_type] || { label: sig.edge_type, color: 'gray' };
+                const riskColor = RISK_COLORS[sig.risk_level] || 'gray';
+
+                return (
+                  <div key={i}>
+                    <div
+                      className={`signal-row signal-clickable ${isExpanded ? 'signal-active' : ''}`}
+                      onClick={() => setExpandedSignal(isExpanded ? null : i)}
+                    >
+                      <span className="signal-market" title={sig.market}>
+                        {sig.market?.substring(0, 50)}{sig.market?.length > 50 ? '...' : ''}
+                      </span>
+                      <span className={sig.side === 'BUY' ? 'text-green' : 'text-red'}>
+                        {sig.side}
+                      </span>
+                      <span>${sig.price?.toFixed(3)}</span>
+                      <span>{sig.size}</span>
+                      <span className={`badge ${edgeInfo.color}`}>{edgeInfo.label}</span>
+                      <span>{sig.confidence?.toFixed(0)}%</span>
+                      <span>
+                        <StatusBadge status={sig.status} />
+                      </span>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="signal-expanded">
+                        <div className="signal-detail-badges">
+                          {sig.risk_level && (
+                            <span className={`badge ${riskColor}`}>{sig.risk_level} risk</span>
+                          )}
+                          {sig.expected_return != null && (
+                            <span className={`badge ${sig.expected_return > 0 ? 'green' : 'red'}`}>
+                              {sig.expected_return > 0 ? '+' : ''}{sig.expected_return.toFixed(1)}% EV
+                            </span>
+                          )}
+                        </div>
+
+                        {sig.description && (
+                          <div className="signal-detail-section">
+                            <div className="signal-detail-label">Edge Description</div>
+                            <div>{sig.description}</div>
+                          </div>
+                        )}
+
+                        {sig.suggested_action && (
+                          <div className="signal-detail-section">
+                            <div className="signal-detail-label">Suggested Action</div>
+                            <div className="signal-detail-highlight">{sig.suggested_action}</div>
+                          </div>
+                        )}
+
+                        {sig.reasoning && (
+                          <div className="signal-detail-section">
+                            <div className="signal-detail-label">Reasoning</div>
+                            <div className="text-secondary">{sig.reasoning}</div>
+                          </div>
+                        )}
+
+                        {sig.status === 'blocked' && sig.reason && (
+                          <div className="signal-detail-section">
+                            <div className="signal-detail-label">Block Reason</div>
+                            <div className="text-red">{sig.reason}</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingInput({ label, value, min, step, prefix, suffix, unlimited, onChange }) {
+  const [local, setLocal] = useState(value);
+  const [isUnlimited, setIsUnlimited] = useState(value >= UNLIMITED);
+
+  useEffect(() => {
+    setLocal(value);
+    setIsUnlimited(value >= UNLIMITED);
+  }, [value]);
+
+  const commit = (val) => {
+    const clamped = Math.max(min, val);
+    setLocal(clamped);
+    onChange(clamped);
+  };
+
+  const handleBlur = () => {
+    if (isUnlimited) return;
+    commit(local);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') e.target.blur();
+  };
+
+  const toggleUnlimited = () => {
+    if (isUnlimited) {
+      const defaultVal = min * 5;
+      setIsUnlimited(false);
+      setLocal(defaultVal);
+      onChange(defaultVal);
+    } else {
+      setIsUnlimited(true);
+      setLocal(UNLIMITED);
+      onChange(UNLIMITED);
+    }
+  };
+
+  return (
+    <div className="setting-row">
+      <span className="setting-label">{label}</span>
+      <div className="setting-input-group">
+        {isUnlimited ? (
+          <span className="setting-value-display">Unlimited</span>
+        ) : (
+          <div className="setting-number-wrap">
+            {prefix && <span className="setting-affix">{prefix}</span>}
+            <input
+              type="number"
+              className="setting-number"
+              value={local}
+              min={min}
+              step={step}
+              onChange={e => setLocal(Number(e.target.value))}
+              onBlur={handleBlur}
+              onKeyDown={handleKeyDown}
+            />
+            {suffix && <span className="setting-affix">{suffix}</span>}
+          </div>
+        )}
+        {unlimited && (
+          <button
+            className={`btn btn-sm ${isUnlimited ? 'btn-active' : 'btn-secondary'}`}
+            onClick={toggleUnlimited}
+          >
+            {isUnlimited ? 'Set Limit' : 'No Limit'}
+          </button>
+        )}
       </div>
     </div>
   );

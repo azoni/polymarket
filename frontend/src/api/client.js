@@ -60,14 +60,16 @@ export async function getStatus() {
 /**
  * Get markets with optional filters.
  */
-export async function getMarkets({ category, minScore, minVolume, limit, offset } = {}) {
+export async function getMarkets({ category, minScore, minVolume, sortBy, search, limit, offset } = {}) {
   const params = new URLSearchParams();
   if (category) params.append('category', category);
   if (minScore) params.append('min_score', minScore);
   if (minVolume) params.append('min_volume', minVolume);
+  if (sortBy) params.append('sort_by', sortBy);
+  if (search) params.append('search', search);
   if (limit) params.append('limit', limit);
   if (offset) params.append('offset', offset);
-  
+
   const query = params.toString();
   return request(`/markets${query ? `?${query}` : ''}`);
 }
@@ -120,10 +122,10 @@ export async function refreshData({ maxMarkets, minVolume, fetchOrderbooks } = {
 }
 
 /**
- * Load demo data for testing.
+ * Get edges (opportunities + predictions) for a specific market.
  */
-export async function loadDemoData() {
-  return request('/load-demo', { method: 'POST' });
+export async function getMarketEdges(marketId) {
+  return request(`/markets/${marketId}/edges`);
 }
 
 /**
@@ -145,4 +147,28 @@ export async function getTradingSignals() {
  */
 export async function triggerScan() {
   return request('/trading/scan', { method: 'POST' });
+}
+
+/**
+ * Get trading bot config (non-secret fields).
+ */
+export async function getTradingConfig() {
+  return request('/trading/config');
+}
+
+/**
+ * Update trading bot config (partial update).
+ */
+export async function updateTradingConfig(updates) {
+  return request('/trading/config', {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
+}
+
+/**
+ * Reset paper account balance and clear all trading state.
+ */
+export async function resetBalance() {
+  return request('/trading/reset', { method: 'POST' });
 }
