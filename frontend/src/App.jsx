@@ -224,6 +224,15 @@ export default function App() {
       <header className="header">
         <h1>Polymarket Trading Platform</h1>
         <div className="flex gap-sm items-center">
+          {tradingStatus?.wallet_balance?.balance != null && (
+            <div className="header-wallet">
+              <span className="header-wallet-label">Wallet</span>
+              <span className="header-wallet-amount">
+                ${tradingStatus.wallet_balance.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+              <span className="header-wallet-currency">USDC</span>
+            </div>
+          )}
           {stats?.last_updated && (
             <span className="text-muted" style={{ fontSize: '0.75rem' }}>
               Updated: {formatTime(stats.last_updated)}

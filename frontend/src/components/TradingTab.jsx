@@ -24,8 +24,6 @@ export function TradingTab({ status, signals, scanning, onScan, config, onConfig
   const risk = status?.risk || {};
   const mode = status?.mode || 'paper';
   const pnl = balance.pnl || 0;
-  const wallet = status?.wallet_balance || { available: false, balance: null };
-
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedSignal, setExpandedSignal] = useState(null);
 
@@ -71,14 +69,6 @@ export function TradingTab({ status, signals, scanning, onScan, config, onConfig
                 from ${balance.starting_balance?.toLocaleString()}
               </span>
             </div>
-            {wallet.balance != null && (
-              <div className="wallet-balance">
-                <span className="text-muted">Wallet:</span>
-                <span className="wallet-amount">
-                  ${wallet.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC
-                </span>
-              </div>
-            )}
             <div className="metrics mt-md">
               <div className="metric">
                 <span className="label">Cycles</span>

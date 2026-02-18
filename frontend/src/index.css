@@ -386,20 +386,30 @@ a:hover {
   font-size: 0.875rem;
 }
 
-.wallet-balance {
+.header-wallet {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  margin-top: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
-  background: var(--bg-secondary);
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius);
   font-size: 0.875rem;
 }
 
-.wallet-amount {
-  font-weight: 600;
-  color: var(--text-primary);
+.header-wallet-label {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.header-wallet-amount {
+  font-weight: 700;
+  color: var(--accent-green);
+}
+
+.header-wallet-currency {
+  color: var(--text-muted);
+  font-size: 0.75rem;
 }
 
 .risk-row {
