@@ -118,13 +118,6 @@ class RiskManager:
         if new_exposure > self.config.max_total_exposure:
             return False, f"Total exposure exceeded (${new_exposure:.2f} > ${self.config.max_total_exposure:.2f})"
 
-        # 5. No doubling down on existing position without headroom
-        if token_id in self.open_positions:
-            pos = self.open_positions[token_id]
-            existing = pos.get("exposure", 0) if isinstance(pos, dict) else pos
-            if existing + cost > self.config.max_position_size:
-                return False, f"Would exceed position limit on this token (${existing + cost:.2f})"
-
         return True, "OK"
 
     def record_trade(self, token_id: str, side: str, price: float, size: float,
