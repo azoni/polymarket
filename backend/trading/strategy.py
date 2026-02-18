@@ -188,10 +188,12 @@ class TradingStrategy:
                     return tradeable.token_id, "BUY", round(bid_price, 3)
 
         elif opp.edge_type.value == "volume_signal":
-            # High volume — if near 50/50, buy the cheaper side
-            for t in [yes_token, no_token]:
-                if t and 0.3 < t.price < 0.7:
-                    return t.token_id, "BUY", round(t.price * 0.99, 3)
+            # Volume spike with directional bias from detection
+            action = opp.suggested_action.lower()
+            if "yes" in action and yes_token and 0.15 < yes_token.price < 0.85:
+                return yes_token.token_id, "BUY", round(yes_token.price * 0.99, 3)
+            elif "no" in action and no_token and 0.15 < no_token.price < 0.85:
+                return no_token.token_id, "BUY", round(no_token.price * 0.99, 3)
 
         return "", "", 0
 

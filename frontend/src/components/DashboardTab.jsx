@@ -36,6 +36,7 @@ export function DashboardTab({ status, signals, stats, onTabChange }) {
   const pnl = balance.pnl || 0;
   const history = status?.balance_history || [];
   const positions = risk.position_details || {};
+  const perf = status?.performance || { total_trades: 0, total_cost: 0, avg_confidence: 0, by_edge_type: {} };
   const recentSignals = (signals || []).slice(0, 5);
 
   // Prepare chart data
@@ -157,45 +158,55 @@ export function DashboardTab({ status, signals, stats, onTabChange }) {
         </div>
       </div>
 
-      {/* Second row: Categories + Positions */}
+      {/* Second row: Performance + Positions */}
       <div className="dashboard-grid">
-        {/* Category Breakdown */}
+        {/* Performance Stats */}
         <div className="card">
           <div className="card-header">
-            <h3>Markets by Category</h3>
+            <h3>Performance</h3>
             <span className="text-muted" style={{ fontSize: '0.875rem' }}>
-              {stats?.total_markets || 0} total
+              {perf.total_trades} trades
             </span>
           </div>
-          <div className="card-body chart-container">
-            {categoryData.length === 0 ? (
-              <div className="empty-state" style={{ padding: 'var(--spacing-lg)' }}>
-                <p className="text-muted">Refresh data to see market breakdown</p>
+          <div className="card-body">
+            {perf.total_trades === 0 ? (
+              <div className="empty-state" style={{ padding: 'var(--spacing-md)' }}>
+                <p className="text-muted">Run scans to start tracking performance</p>
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={categoryData} layout="vertical" margin={{ left: 60 }}>
-                  <XAxis type="number" stroke="#666" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    stroke="#666"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                    width={60}
-                  />
-                  <Tooltip
-                    contentStyle={{ background: '#222', border: '1px solid #333', borderRadius: 6 }}
-                    cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                  />
-                  <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-                    {categoryData.map((entry, i) => (
-                      <Cell key={i} fill={entry.fill} />
+              <>
+                <div className="metrics">
+                  <div className="metric">
+                    <span className="label">Total P&L</span>
+                    <span className={`value ${pnl >= 0 ? 'text-green' : 'text-red'}`}>
+                      ${pnl.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="metric">
+                    <span className="label">Invested</span>
+                    <span className="value">${perf.total_cost?.toLocaleString()}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="label">Avg Conf</span>
+                    <span className="value">{perf.avg_confidence}%</span>
+                  </div>
+                </div>
+                {Object.keys(perf.by_edge_type || {}).length > 0 && (
+                  <div className="mt-md">
+                    <div className="text-muted" style={{ fontSize: '0.75rem', marginBottom: 'var(--spacing-sm)' }}>
+                      By Edge Type
+                    </div>
+                    {Object.entries(perf.by_edge_type).map(([type, data]) => (
+                      <div className="edge-breakdown-row" key={type}>
+                        <span className={`badge ${EDGE_COLORS[type] || 'gray'}`}>{type.replace('_', ' ')}</span>
+                        <span>{data.count} trades</span>
+                        <span>${data.total_cost}</span>
+                        <span>{data.avg_confidence}% conf</span>
+                      </div>
                     ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

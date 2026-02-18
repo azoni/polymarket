@@ -70,6 +70,7 @@ async def reset_balance():
     _bot.risk._day_start_balance = starting
     _bot.signal_history.clear()
     _bot.balance_history.clear()
+    _bot.trade_history.clear()
     _bot._cycles = 0
 
     logger.info("Paper account reset to $%.2f", starting)
@@ -120,3 +121,39 @@ async def update_config(update: ConfigUpdate):
             logger.info(f"Config updated: {key} = {old} -> {value}")
 
     return {k: getattr(_bot.config, k) for k in _CONFIG_FIELDS}
+
+
+# --- Auto-scan endpoints ---
+
+@trading_router.post("/auto-scan/start")
+async def start_auto_scan():
+    """Start automatic scanning on the configured interval."""
+    if _bot is None:
+        return {"error": "Trading bot not initialized"}
+    return _bot.start_auto_scan()
+
+
+@trading_router.post("/auto-scan/stop")
+async def stop_auto_scan():
+    """Stop automatic scanning."""
+    if _bot is None:
+        return {"error": "Trading bot not initialized"}
+    return _bot.stop_auto_scan()
+
+
+# --- Performance endpoints ---
+
+@trading_router.get("/performance")
+async def get_performance():
+    """Get trade performance statistics."""
+    if _bot is None:
+        return {"error": "Trading bot not initialized"}
+    return _bot.get_performance_stats()
+
+
+@trading_router.get("/trades")
+async def get_trade_history():
+    """Get executed trade history (newest first)."""
+    if _bot is None:
+        return []
+    return list(reversed(_bot.trade_history))

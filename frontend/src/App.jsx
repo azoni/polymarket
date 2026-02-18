@@ -29,9 +29,22 @@ export default function App() {
   const [tradingSignals, setTradingSignals] = useState([]);
   const [tradingConfig, setTradingConfig] = useState(null);
   const [scanning, setScanning] = useState(false);
+  const [autoScanning, setAutoScanning] = useState(false);
+
+  // Toast notifications
+  const [toasts, setToasts] = useState([]);
+  const toastIdRef = useRef(0);
 
   // Auto-refresh interval ref
   const autoRefreshRef = useRef(null);
+
+  const addToast = useCallback((message, type = 'info') => {
+    const id = ++toastIdRef.current;
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3000);
+  }, []);
 
   // Fetch trading data
   const fetchTradingData = useCallback(async () => {
@@ -44,6 +57,7 @@ export default function App() {
       setTradingStatus(status);
       setTradingSignals(signals);
       setTradingConfig(config);
+      setAutoScanning(status?.auto_scan || false);
     } catch (err) {
       console.error('[fetchTradingData] Error:', err);
     }
@@ -56,9 +70,10 @@ export default function App() {
       setTradingConfig(updated);
       const status = await api.getTradingStatus();
       setTradingStatus(status);
+      addToast('Settings saved', 'success');
     } catch (err) {
       console.error('[handleConfigChange] Error:', err);
-      setError(err.message);
+      addToast(err.message, 'error');
     }
   };
 
@@ -69,9 +84,10 @@ export default function App() {
       setError(null);
       await api.triggerScan();
       await fetchTradingData();
+      addToast('Scan complete', 'success');
     } catch (err) {
       console.error('[handleScan] Error:', err);
-      setError(err.message);
+      addToast(err.message, 'error');
     } finally {
       setScanning(false);
     }
@@ -83,9 +99,27 @@ export default function App() {
       setError(null);
       await api.resetBalance();
       await fetchTradingData();
+      addToast('Balance reset to $10,000', 'info');
     } catch (err) {
       console.error('[handleReset] Error:', err);
-      setError(err.message);
+      addToast(err.message, 'error');
+    }
+  };
+
+  // Handle auto-scan toggle
+  const handleAutoScanToggle = async () => {
+    try {
+      if (autoScanning) {
+        await api.stopAutoScan();
+        setAutoScanning(false);
+        addToast('Auto-scan stopped', 'info');
+      } else {
+        await api.startAutoScan();
+        setAutoScanning(true);
+        addToast('Auto-scan started', 'success');
+      }
+    } catch (err) {
+      addToast(err.message, 'error');
     }
   };
 
@@ -311,11 +345,22 @@ export default function App() {
                 config={tradingConfig}
                 onConfigChange={handleConfigChange}
                 onReset={handleReset}
+                autoScanning={autoScanning}
+                onAutoScanToggle={handleAutoScanToggle}
               />
             )}
           </>
         )}
       </main>
+
+      {/* Toast Notifications */}
+      <div className="toast-container">
+        {toasts.map(t => (
+          <div key={t.id} className={`toast toast-${t.type}`}>
+            {t.message}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

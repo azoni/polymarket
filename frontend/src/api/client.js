@@ -172,3 +172,19 @@ export async function updateTradingConfig(updates) {
 export async function resetBalance() {
   return request('/trading/reset', { method: 'POST' });
 }
+
+export async function startAutoScan() {
+  return request('/trading/auto-scan/start', { method: 'POST' });
+}
+
+export async function stopAutoScan() {
+  return request('/trading/auto-scan/stop', { method: 'POST' });
+}
+
+export async function getPerformance() {
+  return request('/trading/performance');
+}
+
+export async function getTradeHistory() {
+  return request('/trading/trades');
+}

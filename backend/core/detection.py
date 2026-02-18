@@ -184,56 +184,102 @@ def detect_temporal_arbitrage(markets: List[Market]) -> List[EdgeOpportunity]:
 def detect_volume_spikes(markets: List[Market], threshold: float = 3.0) -> List[EdgeOpportunity]:
     """
     Find markets with unusual volume relative to liquidity.
-    High volume often indicates informed trading.
+    Only signals when price is meaningfully away from 50/50 (clear direction).
     """
     opportunities = []
-    
+
     for market in markets:
         if market.liquidity == 0:
             continue
-        
+
         vol_liq_ratio = market.volume_24h / market.liquidity
-        
-        if vol_liq_ratio > threshold:
-            opportunities.append(EdgeOpportunity(
-                id=str(uuid.uuid4())[:8],
-                edge_type=EdgeType.VOLUME_SIGNAL,
-                description=f"Volume spike: {vol_liq_ratio:.1f}x liquidity",
-                confidence=55,
-                expected_return=0,  # Unknown direction
-                risk_level="high",
-                market_id=market.market_id,
-                market_question=market.question,
-                suggested_action="Research why volume is elevated. Potential informed trading.",
-                reasoning=f"24h volume (${market.volume_24h:,.0f}) is {vol_liq_ratio:.1f}x liquidity (${market.liquidity:,.0f})"
-            ))
-    
+        if vol_liq_ratio <= threshold:
+            continue
+
+        # Require price to be meaningfully away from 50/50
+        price_deviation = abs(market.current_price - 0.5)
+        if price_deviation < 0.1:
+            continue
+
+        if market.current_price > 0.5:
+            direction = "YES"
+            suggested = f"Volume supports YES side (price at {market.current_price:.0%})"
+        else:
+            direction = "NO"
+            suggested = f"Volume supports NO side (price at {market.current_price:.0%})"
+
+        base_confidence = min(75, 50 + (vol_liq_ratio - threshold) * 3)
+        confidence = min(80, base_confidence + price_deviation * 20)
+        expected_return = round(price_deviation * 10, 1)
+
+        opportunities.append(EdgeOpportunity(
+            id=str(uuid.uuid4())[:8],
+            edge_type=EdgeType.VOLUME_SIGNAL,
+            description=f"Volume spike: {vol_liq_ratio:.1f}x liquidity, {direction} bias",
+            confidence=round(confidence, 0),
+            expected_return=expected_return,
+            risk_level="high",
+            market_id=market.market_id,
+            market_question=market.question,
+            suggested_action=suggested,
+            reasoning=f"24h volume (${market.volume_24h:,.0f}) is {vol_liq_ratio:.1f}x "
+                      f"liquidity (${market.liquidity:,.0f}). Price at {market.current_price:.0%} "
+                      f"suggests {direction} momentum."
+        ))
+
     return opportunities
 
 
 def detect_liquidity_gaps(markets: List[Market], min_spread: float = 3.0) -> List[EdgeOpportunity]:
     """
     Find markets with wide spreads where market-making could be profitable.
+    Tiers confidence by spread width and includes token-level detail.
     """
     opportunities = []
-    
+
     for market in markets:
         if market.spread_pct < min_spread or market.volume_24h < 1000:
             continue
-        
+
+        spread = market.spread_pct
+
+        # Tier by spread width
+        if spread > 50:
+            risk, confidence = "high", 50
+        elif spread > 20:
+            risk, confidence = "high", 55
+        elif spread > 10:
+            risk, confidence = "medium", 65
+        else:
+            risk, confidence = "medium", 70
+
+        expected_return = min(spread / 3, 15.0)
+
+        # Build differentiated reasoning with token info
+        token_info = ""
+        if market.tokens:
+            prices = [f"{t.outcome}: {t.price:.0%}" for t in market.tokens[:3]]
+            token_info = f" Tokens: {', '.join(prices)}."
+            t0 = market.tokens[0]
+            if t0.best_bid > 0 and t0.best_ask > 0:
+                token_info += f" Bid: {t0.best_bid:.3f}, Ask: {t0.best_ask:.3f}."
+
+        target_spread = max(1.0, spread / 3)
+
         opportunities.append(EdgeOpportunity(
             id=str(uuid.uuid4())[:8],
             edge_type=EdgeType.LIQUIDITY_GAP,
-            description=f"Wide spread: {market.spread_pct:.1f}%",
-            confidence=65,
-            expected_return=market.spread_pct / 2,  # Capture half the spread
-            risk_level="medium",
+            description=f"Wide spread: {spread:.1f}% ({risk} risk)",
+            confidence=confidence,
+            expected_return=round(expected_return, 1),
+            risk_level=risk,
             market_id=market.market_id,
             market_question=market.question,
-            suggested_action=f"Provide liquidity at tighter spread",
-            reasoning=f"Spread {market.spread_pct:.1f}% with ${market.volume_24h:,.0f} daily volume"
+            suggested_action=f"Provide liquidity at tighter spread (target {target_spread:.1f}%)",
+            reasoning=f"Spread {spread:.1f}% on ${market.volume_24h:,.0f} daily volume, "
+                      f"${market.liquidity:,.0f} liquidity.{token_info}"
         ))
-    
+
     return opportunities
 
 

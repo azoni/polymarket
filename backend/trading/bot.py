@@ -5,6 +5,7 @@ Trading bot — main loop that scans, evaluates, and trades on a schedule.
 import time
 import signal
 import logging
+import threading
 from datetime import datetime
 
 from .config import TradingConfig, trading_config
@@ -34,7 +35,10 @@ class TradingBot:
         self._scanning = False
         self.signal_history: list[dict] = []  # last 100 signal results
         self.balance_history: list[dict] = []  # balance snapshots for P&L chart
+        self.trade_history: list[dict] = []    # all executed trades (cap 500)
         self._last_scan_at: str = ""
+        self._auto_scan = False
+        self._auto_scan_thread: threading.Thread | None = None
 
     def start(self):
         """Start the bot loop."""
@@ -157,6 +161,26 @@ class TradingBot:
             if len(self.signal_history) > 100:
                 self.signal_history = self.signal_history[-100:]
 
+            # Record executed trades for performance tracking
+            for i, sig in enumerate(signals):
+                status = results[i]["status"] if i < len(results) else "unknown"
+                if status in ("executed", "dry_run"):
+                    cost = sig.price * sig.size
+                    self.trade_history.append({
+                        "timestamp": self._last_scan_at,
+                        "market": sig.market_question,
+                        "side": sig.side,
+                        "entry_price": sig.price,
+                        "size": sig.size,
+                        "cost": round(cost, 2),
+                        "edge_type": sig.edge_type,
+                        "confidence": sig.confidence,
+                        "expected_return": sig.expected_return,
+                        "token_id": sig.token_id,
+                    })
+            if len(self.trade_history) > 500:
+                self.trade_history = self.trade_history[-500:]
+
             # Snapshot balance for P&L chart
             pa = self.risk.paper_account
             self.balance_history.append({
@@ -170,6 +194,71 @@ class TradingBot:
             return results
         finally:
             self._scanning = False
+
+    def start_auto_scan(self) -> dict:
+        """Start automatic scanning on config.scan_interval."""
+        if self._auto_scan:
+            return {"status": "already_running", "interval": self.config.scan_interval}
+        self._auto_scan = True
+        self._auto_scan_thread = threading.Thread(target=self._auto_scan_loop, daemon=True)
+        self._auto_scan_thread.start()
+        logger.info(f"Auto-scan started (interval: {self.config.scan_interval}s)")
+        return {"status": "started", "interval": self.config.scan_interval}
+
+    def stop_auto_scan(self) -> dict:
+        """Stop automatic scanning."""
+        if not self._auto_scan:
+            return {"status": "already_stopped"}
+        self._auto_scan = False
+        logger.info("Auto-scan stopped")
+        return {"status": "stopped"}
+
+    def _auto_scan_loop(self):
+        """Background loop that calls run_once() on interval."""
+        while self._auto_scan:
+            try:
+                self.run_once()
+            except Exception as e:
+                logger.error(f"Auto-scan cycle error: {e}", exc_info=True)
+            # Sleep in 1-second increments so stop is responsive
+            for _ in range(self.config.scan_interval):
+                if not self._auto_scan:
+                    break
+                time.sleep(1)
+
+    def get_performance_stats(self) -> dict:
+        """Compute performance statistics from trade history."""
+        if not self.trade_history:
+            return {
+                "total_trades": 0, "avg_confidence": 0,
+                "total_cost": 0, "by_edge_type": {},
+                "pnl": round(self.risk.paper_account.pnl, 2),
+            }
+        total = len(self.trade_history)
+        total_cost = sum(t["cost"] for t in self.trade_history)
+        avg_confidence = sum(t["confidence"] for t in self.trade_history) / total
+
+        by_edge: dict = {}
+        for t in self.trade_history:
+            et = t["edge_type"]
+            if et not in by_edge:
+                by_edge[et] = {"count": 0, "total_cost": 0, "confidences": []}
+            by_edge[et]["count"] += 1
+            by_edge[et]["total_cost"] += t["cost"]
+            by_edge[et]["confidences"].append(t["confidence"])
+
+        for data in by_edge.values():
+            data["avg_confidence"] = round(sum(data["confidences"]) / len(data["confidences"]), 1)
+            data["total_cost"] = round(data["total_cost"], 2)
+            del data["confidences"]
+
+        return {
+            "total_trades": total,
+            "total_cost": round(total_cost, 2),
+            "avg_confidence": round(avg_confidence, 1),
+            "by_edge_type": by_edge,
+            "pnl": round(self.risk.paper_account.pnl, 2),
+        }
 
     def get_status(self) -> dict:
         """Get current bot status for the dashboard."""
@@ -185,4 +274,6 @@ class TradingBot:
             "balance": self.risk.paper_account.to_dict(),
             "risk": risk,
             "balance_history": self.balance_history,
+            "auto_scan": self._auto_scan,
+            "performance": self.get_performance_stats(),
         }

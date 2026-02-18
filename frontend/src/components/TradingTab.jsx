@@ -19,7 +19,7 @@ const RISK_COLORS = {
 
 const UNLIMITED = 999999;
 
-export function TradingTab({ status, signals, scanning, onScan, config, onConfigChange, onReset }) {
+export function TradingTab({ status, signals, scanning, onScan, config, onConfigChange, onReset, autoScanning, onAutoScanToggle }) {
   const balance = status?.balance || { balance: 10000, starting_balance: 10000, pnl: 0 };
   const risk = status?.risk || {};
   const mode = status?.mode || 'paper';
@@ -221,6 +221,13 @@ export function TradingTab({ status, signals, scanning, onScan, config, onConfig
               onChange={v => onConfigChange({ min_expected_return: v })}
             />
             <SettingInput
+              label="Min Liquidity"
+              value={config.min_liquidity}
+              min={0} step={1000}
+              prefix="$"
+              onChange={v => onConfigChange({ min_liquidity: v })}
+            />
+            <SettingInput
               label="Scan Interval"
               value={config.scan_interval}
               min={10} step={10}
@@ -231,24 +238,37 @@ export function TradingTab({ status, signals, scanning, onScan, config, onConfig
         )}
       </div>
 
-      {/* Scan button */}
-      <div className="mb-md">
+      {/* Scan Controls */}
+      <div className="scan-controls mb-md">
         <button
           className="btn btn-primary"
           onClick={onScan}
-          disabled={scanning}
-          style={{ width: '100%', justifyContent: 'center', padding: '12px' }}
+          disabled={scanning || autoScanning}
+          style={{ flex: 1, justifyContent: 'center', padding: '12px' }}
         >
           {scanning ? (
             <>
               <span className="spinner" style={{ width: 16, height: 16 }} />
-              Scanning markets...
+              Scanning...
             </>
           ) : (
             'Run Scan'
           )}
         </button>
+        <button
+          className={`btn ${autoScanning ? 'btn-danger' : 'btn-secondary'}`}
+          onClick={onAutoScanToggle}
+          style={{ minWidth: 150, justifyContent: 'center', padding: '12px' }}
+        >
+          {autoScanning ? 'Stop Auto-Scan' : 'Start Auto-Scan'}
+        </button>
       </div>
+      {autoScanning && (
+        <div className="auto-scan-banner mb-md">
+          <span className="spinner" style={{ width: 14, height: 14 }} />
+          Auto-scanning every {config?.scan_interval || 120}s
+        </div>
+      )}
 
       {/* Signals table */}
       <div className="card">
