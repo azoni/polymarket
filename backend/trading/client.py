@@ -8,7 +8,7 @@ from typing import Optional
 from datetime import datetime
 
 from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import ApiCreds, OrderArgs, OrderType
+from py_clob_client.clob_types import ApiCreds, OrderArgs, OrderType, BalanceAllowanceParams
 
 from .config import TradingConfig, trading_config
 
@@ -202,27 +202,21 @@ class PolymarketTrader:
             return []
 
     def get_balance(self) -> Optional[float]:
-        """Get USDC balance on Polygon via direct RPC call."""
+        """Get USDC balance from Polymarket exchange (Gnosis Safe proxy wallet)."""
         self._require_connection()
         try:
-            import requests as _req
-            from eth_account import Account
-
-            acct = Account.from_key(self.config.private_key)
-            addr = acct.address.lower()[2:]
-
-            # USDC.e on Polygon — balanceOf(address)
-            usdc = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-            data = "0x70a08231" + addr.zfill(64)
-
-            resp = _req.post("https://polygon.drpc.org", json={
-                "jsonrpc": "2.0", "method": "eth_call",
-                "params": [{"to": usdc, "data": data}, "latest"], "id": 1,
-            }, timeout=5)
-            r = resp.json()
-            if "result" in r:
-                return int(r["result"], 16) / 1e6
-            return None
+            # Try each signature type: Gnosis Safe (2), Poly Proxy (1), EOA (0)
+            for sig_type in (2, 1, 0):
+                params = BalanceAllowanceParams(
+                    asset_type="COLLATERAL",
+                    signature_type=sig_type,
+                )
+                result = self._client.get_balance_allowance(params)
+                if result and "balance" in result:
+                    raw = int(result["balance"])
+                    if raw > 0:
+                        return raw / 1e6  # USDC has 6 decimals
+            return 0.0
         except Exception as e:
             logger.error(f"Failed to get balance: {e}")
             return None
