@@ -47,6 +47,22 @@ export function DashboardTab({
     balance: h.balance,
   }));
 
+  const formatTime = (ts) => {
+    if (!ts) return '';
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  const timeAgo = (ts) => {
+    if (!ts) return '';
+    const diff = Date.now() - new Date(ts).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  };
+
   const positionEntries = Object.entries(positions);
 
   const handleModeToggle = () => {
@@ -102,6 +118,16 @@ export function DashboardTab({
           <div className="auto-scan-banner mb-md">
             <span className="spinner" style={{ width: 14, height: 14 }} />
             Auto-scanning every {config?.scan_interval || 120}s
+            {status?.last_scan_at && (
+              <span className="text-muted" style={{ marginLeft: 'auto', fontSize: 11 }}>
+                Last scan: {formatTime(status.last_scan_at)}
+              </span>
+            )}
+          </div>
+        )}
+        {!autoScanning && status?.last_scan_at && (
+          <div className="text-muted mb-md" style={{ fontSize: 11 }}>
+            Last scan: {formatTime(status.last_scan_at)} ({timeAgo(status.last_scan_at)})
           </div>
         )}
 
@@ -315,10 +341,17 @@ export function DashboardTab({
                           <span className={info.side === 'BUY' ? 'text-green' : 'text-red'}>{info.side}</span>
                         )}
                         {info.entry_price != null && (
-                          <span className="text-muted">@ ${info.entry_price.toFixed(3)}</span>
+                          <span className="text-muted">
+                            {Math.round(info.exposure / info.entry_price)} shares @ ${info.entry_price.toFixed(3)}
+                          </span>
                         )}
                         {info.edge_type && (
                           <span className={`badge ${EDGE_COLORS[info.edge_type] || 'gray'}`}>{info.edge_type}</span>
+                        )}
+                        {info.opened_at && (
+                          <span className="text-muted" style={{ fontSize: 10 }}>
+                            {timeAgo(info.opened_at)}
+                          </span>
                         )}
                       </div>
                       {info.reasoning && (
@@ -394,24 +427,41 @@ export function DashboardTab({
                     className={`signal-card ${isExpanded ? 'signal-card-active' : ''}`}
                     onClick={() => setExpandedSignal(isExpanded ? null : i)}
                   >
-                    <div className="signal-card-market" title={sig.market}>
-                      {sig.market}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                      <div className="signal-card-market" title={sig.market} style={{ flex: 1 }}>
+                        {sig.market}
+                      </div>
+                      {sig.timestamp && (
+                        <span className="text-muted" style={{ fontSize: 10, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          {timeAgo(sig.timestamp)}
+                        </span>
+                      )}
                     </div>
                     <div className="signal-card-row">
                       <span className={sig.side === 'BUY' ? 'text-green' : 'text-red'} style={{ fontWeight: 600 }}>
                         {sig.side}
                       </span>
-                      <span className="text-secondary">${sig.price?.toFixed(3)}</span>
-                      <span className="text-secondary">{sig.size} shares</span>
+                      <span className="text-secondary">{sig.size} @ ${sig.price?.toFixed(3)}</span>
+                      <span className="text-muted">= ${(sig.price * sig.size).toFixed(2)}</span>
                     </div>
                     <div className="signal-card-row" style={{ marginTop: 4 }}>
                       <span className={`badge ${edgeInfo.color}`}>{edgeInfo.label}</span>
-                      <span className="text-secondary">{sig.confidence?.toFixed(0)}%</span>
+                      <span className="text-secondary">{sig.confidence?.toFixed(0)}% conf</span>
+                      {sig.expected_return != null && (
+                        <span className={sig.expected_return > 0 ? 'text-green' : 'text-muted'} style={{ fontSize: 11 }}>
+                          {sig.expected_return > 0 ? '+' : ''}{sig.expected_return.toFixed(1)}% EV
+                        </span>
+                      )}
                       <StatusBadge status={sig.status} />
                     </div>
                   </div>
                   {isExpanded && (
                     <div className="signal-card-detail">
+                      {/* Timestamp + scan cycle */}
+                      <div className="text-muted" style={{ fontSize: 10, marginBottom: 8 }}>
+                        {sig.timestamp && formatTime(sig.timestamp)}
+                        {sig.cycle && <span> &middot; Scan #{sig.cycle}</span>}
+                      </div>
                       <div className="signal-detail-badges" style={{ marginBottom: 8 }}>
                         {sig.risk_level && <span className={`badge ${riskColor}`}>{sig.risk_level} risk</span>}
                         {sig.expected_return != null && (
