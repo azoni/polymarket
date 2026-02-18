@@ -224,7 +224,10 @@ class TradingStrategy:
 
             if result:
                 self.risk.record_trade(
-                    signal.token_id, signal.side, signal.price, signal.size
+                    signal.token_id, signal.side, signal.price, signal.size,
+                    market=signal.market_question,
+                    edge_type=signal.edge_type,
+                    reasoning=signal.reasoning,
                 )
                 results.append({
                     "status": "executed" if not self.config.dry_run else "dry_run",

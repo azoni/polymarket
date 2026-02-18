@@ -622,27 +622,47 @@ a:hover {
   font-size: 0.875rem;
 }
 
-.positions-header {
-  display: flex;
-  justify-content: space-between;
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding-bottom: var(--spacing-sm);
-  border-bottom: 1px solid var(--border-color);
-  margin-bottom: var(--spacing-sm);
-}
-
-.positions-row {
-  display: flex;
-  justify-content: space-between;
-  padding: var(--spacing-xs) 0;
+.position-card {
+  padding: var(--spacing-sm) 0;
   border-bottom: 1px solid var(--border-color);
 }
 
-.positions-row:last-child {
+.position-card:last-child {
   border-bottom: none;
+}
+
+.position-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.position-market {
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.position-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: 4px;
+  font-size: 0.8rem;
+}
+
+.position-reasoning {
+  margin-top: 4px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 /* Recent Signals (compact) */

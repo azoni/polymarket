@@ -79,7 +79,13 @@ class RiskManager:
     @property
     def total_exposure(self) -> float:
         """Total $ across all open positions."""
-        return sum(abs(v) for v in self.open_positions.values())
+        total = 0
+        for v in self.open_positions.values():
+            if isinstance(v, dict):
+                total += abs(v.get("exposure", 0))
+            else:
+                total += abs(v)
+        return total
 
     @property
     def open_order_count(self) -> int:
@@ -112,13 +118,15 @@ class RiskManager:
 
         # 5. No doubling down on existing position without headroom
         if token_id in self.open_positions:
-            existing = self.open_positions[token_id]
+            pos = self.open_positions[token_id]
+            existing = pos.get("exposure", 0) if isinstance(pos, dict) else pos
             if existing + cost > self.config.max_position_size:
                 return False, f"Would exceed position limit on this token (${existing + cost:.2f})"
 
         return True, "OK"
 
-    def record_trade(self, token_id: str, side: str, price: float, size: float):
+    def record_trade(self, token_id: str, side: str, price: float, size: float,
+                     market: str = "", edge_type: str = "", reasoning: str = ""):
         """Record a trade that was executed."""
         self._reset_daily()
         cost = price * size
@@ -132,13 +140,29 @@ class RiskManager:
         ))
 
         if side == "BUY":
-            self.open_positions[token_id] = self.open_positions.get(token_id, 0) + cost
+            existing = self.open_positions.get(token_id)
+            if existing and isinstance(existing, dict):
+                existing["exposure"] = existing["exposure"] + cost
+            else:
+                self.open_positions[token_id] = {
+                    "exposure": cost,
+                    "side": side,
+                    "entry_price": price,
+                    "market": market,
+                    "edge_type": edge_type,
+                    "reasoning": reasoning,
+                    "opened_at": datetime.now().isoformat(),
+                }
             self.paper_account.deduct(cost)
         elif side == "SELL":
-            self.open_positions[token_id] = self.open_positions.get(token_id, 0) - cost
-            self.paper_account.credit(cost)
-            if self.open_positions.get(token_id, 0) <= 0:
+            existing = self.open_positions.get(token_id)
+            if existing and isinstance(existing, dict):
+                existing["exposure"] = existing["exposure"] - cost
+                if existing["exposure"] <= 0:
+                    self.open_positions.pop(token_id, None)
+            else:
                 self.open_positions.pop(token_id, None)
+            self.paper_account.credit(cost)
 
         logger.info(f"Recorded {side} {size:.1f} @ ${price:.3f} = ${cost:.2f}. "
                      f"Exposure: ${self.total_exposure:.2f}, Open: {self.open_order_count}")
@@ -154,5 +178,12 @@ class RiskManager:
             "open_positions": self.open_order_count,
             "max_positions": self.config.max_open_orders,
             "trades_today": len(self.trades_today),
-            "position_details": {k: round(v, 2) for k, v in self.open_positions.items()},
+            "position_details": {
+                k: (
+                    {**v, "exposure": round(v["exposure"], 2)}
+                    if isinstance(v, dict)
+                    else {"exposure": round(v, 2)}
+                )
+                for k, v in self.open_positions.items()
+            },
         }

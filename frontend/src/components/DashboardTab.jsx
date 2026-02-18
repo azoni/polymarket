@@ -15,6 +15,13 @@ const CATEGORY_COLORS = {
   other: '#666666',
 };
 
+const EDGE_COLORS = {
+  arbitrage: 'green',
+  mispricing: 'yellow',
+  volume_signal: 'purple',
+  liquidity_gap: 'blue',
+};
+
 const STATUS_COLORS = {
   executed: 'green',
   dry_run: 'blue',
@@ -208,18 +215,39 @@ export function DashboardTab({ status, signals, stats, onTabChange }) {
               </div>
             ) : (
               <div className="positions-table">
-                <div className="positions-header">
-                  <span>Token</span>
-                  <span>Exposure</span>
-                </div>
-                {positionEntries.map(([tokenId, exposure]) => (
-                  <div className="positions-row" key={tokenId}>
-                    <span className="text-secondary" title={tokenId}>
-                      {tokenId.substring(0, 16)}...
-                    </span>
-                    <span className="value">${exposure.toFixed(2)}</span>
-                  </div>
-                ))}
+                {positionEntries.map(([tokenId, pos]) => {
+                  const info = typeof pos === 'object' ? pos : { exposure: pos };
+                  return (
+                    <div className="position-card" key={tokenId}>
+                      <div className="position-card-top">
+                        <span className="position-market" title={info.market || tokenId}>
+                          {info.market || `${tokenId.substring(0, 16)}...`}
+                        </span>
+                        <span className="value">${(info.exposure || 0).toFixed(2)}</span>
+                      </div>
+                      <div className="position-card-meta">
+                        {info.side && (
+                          <span className={info.side === 'BUY' ? 'text-green' : 'text-red'}>
+                            {info.side}
+                          </span>
+                        )}
+                        {info.entry_price != null && (
+                          <span className="text-muted">@ ${info.entry_price.toFixed(3)}</span>
+                        )}
+                        {info.edge_type && (
+                          <span className={`badge ${EDGE_COLORS[info.edge_type] || 'gray'}`}>
+                            {info.edge_type}
+                          </span>
+                        )}
+                      </div>
+                      {info.reasoning && (
+                        <div className="position-reasoning text-muted">
+                          {info.reasoning}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
