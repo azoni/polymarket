@@ -121,6 +121,16 @@ class TradingStrategy:
 
         # Size: scale with confidence, cap at max_position_size
         raw_size = (opp.confidence / 100) * self.config.max_position_size
+
+        # Reduce size if we already hold this token
+        existing_pos = self.risk.open_positions.get(token_id)
+        if existing_pos:
+            existing_exp = existing_pos.get("exposure", 0) if isinstance(existing_pos, dict) else existing_pos
+            remaining = self.config.max_position_size - existing_exp
+            if remaining <= 0:
+                return None  # already at max for this token
+            raw_size = min(raw_size, remaining)
+
         size = round(raw_size / price, 1) if price > 0 else 0
         if size <= 0:
             return None
