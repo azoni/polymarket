@@ -4,13 +4,12 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { StatCard, TradingTab, DashboardTab, ScannerTab } from './components';
+import { StatCard, DashboardTab, ScannerTab } from './components';
 import * as api from './api/client';
 
 const TABS = {
   DASHBOARD: 'dashboard',
   SCANNER: 'scanner',
-  TRADING: 'trading',
 };
 
 export default function App() {
@@ -152,9 +151,9 @@ export default function App() {
     fetchTradingData();
   }, [fetchData, fetchTradingData]);
 
-  // Auto-refresh every 15 seconds on Dashboard or Trading tabs
+  // Auto-refresh every 15 seconds on Dashboard tab
   useEffect(() => {
-    if (activeTab === TABS.DASHBOARD || activeTab === TABS.TRADING) {
+    if (activeTab === TABS.DASHBOARD) {
       autoRefreshRef.current = setInterval(() => {
         fetchTradingData();
       }, 15000);
@@ -304,12 +303,6 @@ export default function App() {
           >
             Scanner
           </button>
-          <button
-            className={`tab ${activeTab === TABS.TRADING ? 'active' : ''}`}
-            onClick={() => { setActiveTab(TABS.TRADING); fetchTradingData(); }}
-          >
-            Trading
-          </button>
         </div>
 
         {/* Loading State */}
@@ -328,11 +321,13 @@ export default function App() {
               <DashboardTab
                 status={tradingStatus}
                 signals={tradingSignals}
-                stats={stats}
-                onTabChange={(tab) => {
-                  setActiveTab(tab);
-                  if (tab === TABS.TRADING) fetchTradingData();
-                }}
+                scanning={scanning}
+                onScan={handleScan}
+                config={tradingConfig}
+                onConfigChange={handleConfigChange}
+                onReset={handleReset}
+                autoScanning={autoScanning}
+                onAutoScanToggle={handleAutoScanToggle}
               />
             )}
 
@@ -341,21 +336,6 @@ export default function App() {
               <ScannerTab
                 opportunities={opportunities}
                 predictions={predictions}
-              />
-            )}
-
-            {/* Trading Tab */}
-            {activeTab === TABS.TRADING && (
-              <TradingTab
-                status={tradingStatus}
-                signals={tradingSignals}
-                scanning={scanning}
-                onScan={handleScan}
-                config={tradingConfig}
-                onConfigChange={handleConfigChange}
-                onReset={handleReset}
-                autoScanning={autoScanning}
-                onAutoScanToggle={handleAutoScanToggle}
               />
             )}
           </>

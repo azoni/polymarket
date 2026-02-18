@@ -368,14 +368,6 @@ a:hover {
 .mt-md { margin-top: var(--spacing-md); }
 .mb-md { margin-bottom: var(--spacing-md); }
 
-/* Trading Tab */
-.trading-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--spacing-md);
-  margin-bottom: var(--spacing-md);
-}
-
 .account-balance {
   font-size: 2rem;
   font-weight: 700;
@@ -922,10 +914,6 @@ a:hover {
   .data-row {
     grid-template-columns: 1fr;
     gap: var(--spacing-sm);
-  }
-
-  .trading-grid {
-    grid-template-columns: 1fr;
   }
 
   .signal-row {
