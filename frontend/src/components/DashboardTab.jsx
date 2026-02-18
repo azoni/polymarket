@@ -69,6 +69,38 @@ export function DashboardTab({
 
   return (
     <div className="dashboard-tab">
+      {/* Scan Controls */}
+      <div className="scan-controls mb-md">
+        <button
+          className="btn btn-primary"
+          onClick={onScan}
+          disabled={scanning || autoScanning}
+          style={{ flex: 1, justifyContent: 'center', padding: '4px 12px' }}
+        >
+          {scanning ? (
+            <>
+              <span className="spinner" style={{ width: 14, height: 14 }} />
+              Scanning...
+            </>
+          ) : (
+            'Run Scan'
+          )}
+        </button>
+        <button
+          className={`btn ${autoScanning ? 'btn-danger' : 'btn-secondary'}`}
+          onClick={onAutoScanToggle}
+          style={{ minWidth: 140, justifyContent: 'center', padding: '4px 12px' }}
+        >
+          {autoScanning ? 'Stop Auto-Scan' : 'Start Auto-Scan'}
+        </button>
+      </div>
+      {autoScanning && (
+        <div className="auto-scan-banner mb-md">
+          <span className="spinner" style={{ width: 12, height: 12 }} />
+          Auto-scanning every {config?.scan_interval || 120}s
+        </div>
+      )}
+
       {/* Row 1: Account + Balance Chart */}
       <div className="dashboard-grid">
         <div className="card">
@@ -123,13 +155,13 @@ export function DashboardTab({
         <div className="card">
           <div className="card-header">
             <h3>Balance History</h3>
-            <span className="text-muted" style={{ fontSize: '0.875rem' }}>
+            <span style={{ fontSize: 10, color: '#c0c0c0' }}>
               {history.length} snapshots
             </span>
           </div>
           <div className="card-body chart-container">
             {chartData.length < 2 ? (
-              <div className="empty-state" style={{ padding: 'var(--spacing-lg)' }}>
+              <div className="empty-state">
                 <p className="text-muted">Run scans to start tracking balance over time</p>
               </div>
             ) : (
@@ -137,25 +169,25 @@ export function DashboardTab({
                 <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="balanceGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={pnl >= 0 ? '#00ff41' : '#ff3333'} stopOpacity={0.25} />
-                      <stop offset="95%" stopColor={pnl >= 0 ? '#00ff41' : '#ff3333'} stopOpacity={0} />
+                      <stop offset="5%" stopColor={pnl >= 0 ? '#000080' : '#ff0000'} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={pnl >= 0 ? '#000080' : '#ff0000'} stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="time" stroke="#5c6370" fontSize={10} tickLine={false} axisLine={false} fontFamily="JetBrains Mono, monospace" />
+                  <XAxis dataKey="time" stroke="#808080" fontSize={10} tickLine={false} axisLine={false} fontFamily="Tahoma, Arial, sans-serif" />
                   <YAxis
-                    stroke="#5c6370" fontSize={10} tickLine={false} axisLine={false}
+                    stroke="#808080" fontSize={10} tickLine={false} axisLine={false}
                     tickFormatter={v => `$${v.toLocaleString()}`}
                     domain={['dataMin - 50', 'dataMax + 50']}
-                    fontFamily="JetBrains Mono, monospace"
+                    fontFamily="Tahoma, Arial, sans-serif"
                   />
                   <Tooltip
-                    contentStyle={{ background: '#0d1117', border: '1px solid #1b2838', borderRadius: 0, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}
-                    labelStyle={{ color: '#5c6370' }}
+                    contentStyle={{ background: '#c0c0c0', border: '2px outset #c0c0c0', borderRadius: 0, fontFamily: 'Tahoma, Arial, sans-serif', fontSize: 11, color: '#000' }}
+                    labelStyle={{ color: '#404040' }}
                     formatter={(value) => [`$${value.toLocaleString()}`, 'Balance']}
                   />
                   <Area
                     type="monotone" dataKey="balance"
-                    stroke={pnl >= 0 ? '#00ff41' : '#ff3333'}
+                    stroke={pnl >= 0 ? '#000080' : '#ff0000'}
                     fill="url(#balanceGrad)" strokeWidth={2}
                   />
                 </AreaChart>
@@ -164,38 +196,6 @@ export function DashboardTab({
           </div>
         </div>
       </div>
-
-      {/* Scan Controls */}
-      <div className="scan-controls mb-md">
-        <button
-          className="btn btn-primary"
-          onClick={onScan}
-          disabled={scanning || autoScanning}
-          style={{ flex: 1, justifyContent: 'center', padding: '12px' }}
-        >
-          {scanning ? (
-            <>
-              <span className="spinner" style={{ width: 16, height: 16 }} />
-              Scanning...
-            </>
-          ) : (
-            'Run Scan'
-          )}
-        </button>
-        <button
-          className={`btn ${autoScanning ? 'btn-danger' : 'btn-secondary'}`}
-          onClick={onAutoScanToggle}
-          style={{ minWidth: 150, justifyContent: 'center', padding: '12px' }}
-        >
-          {autoScanning ? 'Stop Auto-Scan' : 'Start Auto-Scan'}
-        </button>
-      </div>
-      {autoScanning && (
-        <div className="auto-scan-banner mb-md">
-          <span className="spinner" style={{ width: 14, height: 14 }} />
-          Auto-scanning every {config?.scan_interval || 120}s
-        </div>
-      )}
 
       {/* Row 2: Risk + Performance */}
       <div className="dashboard-grid">
@@ -245,13 +245,13 @@ export function DashboardTab({
         <div className="card">
           <div className="card-header">
             <h3>Performance</h3>
-            <span className="text-muted" style={{ fontSize: '0.875rem' }}>
+            <span style={{ fontSize: 10, color: '#c0c0c0' }}>
               {perf.total_trades} trades
             </span>
           </div>
           <div className="card-body">
             {perf.total_trades === 0 ? (
-              <div className="empty-state" style={{ padding: 'var(--spacing-md)' }}>
+              <div className="empty-state">
                 <p className="text-muted">Run scans to start tracking performance</p>
               </div>
             ) : (
@@ -272,7 +272,7 @@ export function DashboardTab({
                 </div>
                 {Object.keys(perf.by_edge_type || {}).length > 0 && (
                   <div className="mt-md">
-                    <div className="text-muted" style={{ fontSize: '0.75rem', marginBottom: 'var(--spacing-sm)' }}>
+                    <div className="text-muted" style={{ fontSize: 10, marginBottom: 4 }}>
                       By Edge Type
                     </div>
                     {Object.entries(perf.by_edge_type).map(([type, data]) => (
@@ -296,7 +296,7 @@ export function DashboardTab({
         <div className="card">
           <div className="card-header">
             <h3>Active Positions</h3>
-            <span className="text-muted" style={{ fontSize: '0.875rem' }}>
+            <span style={{ fontSize: 10, color: '#c0c0c0' }}>
               {positionEntries.length} open
             </span>
           </div>
@@ -334,53 +334,15 @@ export function DashboardTab({
         </div>
       )}
 
-      {/* Settings */}
-      <div className="card settings-card">
-        <div
-          className="card-header"
-          style={{ cursor: 'pointer' }}
-          onClick={() => setSettingsOpen(!settingsOpen)}
-        >
-          <h3>Settings</h3>
-          <span className="text-muted" style={{ fontSize: '0.875rem' }}>
-            {settingsOpen ? 'Collapse' : 'Expand'}
-          </span>
-        </div>
-        {settingsOpen && config && (
-          <div className="card-body">
-            <div className="setting-row">
-              <span className="setting-label">Trading Mode</span>
-              <div className="setting-input-group">
-                <button
-                  className={`btn ${config.dry_run ? 'btn-secondary' : 'btn-danger'}`}
-                  onClick={handleModeToggle}
-                  style={{ minWidth: 120 }}
-                >
-                  {config.dry_run ? 'Paper Mode' : 'LIVE MODE'}
-                </button>
-              </div>
-            </div>
-            <SettingInput label="Max Position" value={config.max_position_size} min={10} step={10} prefix="$" onChange={v => onConfigChange({ max_position_size: v })} />
-            <SettingInput label="Max Daily Loss" value={config.max_daily_loss} min={5} step={5} prefix="$" unlimited onChange={v => onConfigChange({ max_daily_loss: v })} />
-            <SettingInput label="Max Exposure" value={config.max_total_exposure} min={50} step={25} prefix="$" onChange={v => onConfigChange({ max_total_exposure: v })} />
-            <SettingInput label="Max Open Positions" value={config.max_open_orders} min={1} step={1} onChange={v => onConfigChange({ max_open_orders: v })} />
-            <SettingInput label="Min Confidence" value={config.min_confidence} min={10} step={5} suffix="%" onChange={v => onConfigChange({ min_confidence: v })} />
-            <SettingInput label="Min Expected Return" value={config.min_expected_return} min={0.5} step={0.5} suffix="%" onChange={v => onConfigChange({ min_expected_return: v })} />
-            <SettingInput label="Min Liquidity" value={config.min_liquidity} min={0} step={1000} prefix="$" onChange={v => onConfigChange({ min_liquidity: v })} />
-            <SettingInput label="Scan Interval" value={config.scan_interval} min={10} step={10} suffix="s" onChange={v => onConfigChange({ scan_interval: v })} />
-          </div>
-        )}
-      </div>
-
       {/* Signals Table */}
       <div className="card">
         <div className="card-header">
           <h3>Signals</h3>
-          <span className="text-muted">{(signals || []).length} total</span>
+          <span style={{ fontSize: 10, color: '#c0c0c0' }}>{(signals || []).length} total</span>
         </div>
         <div className="card-body" style={{ padding: 0 }}>
           {(signals || []).length === 0 ? (
-            <div className="empty-state" style={{ padding: 'var(--spacing-lg)' }}>
+            <div className="empty-state">
               <p className="text-muted">No signals yet. Click "Run Scan" to find opportunities.</p>
             </div>
           ) : (
@@ -457,6 +419,44 @@ export function DashboardTab({
             </div>
           )}
         </div>
+      </div>
+
+      {/* Settings (collapsible, bottom) */}
+      <div className="card settings-card">
+        <div
+          className="card-header"
+          style={{ cursor: 'pointer' }}
+          onClick={() => setSettingsOpen(!settingsOpen)}
+        >
+          <h3>Settings</h3>
+          <span style={{ fontSize: 10, color: '#c0c0c0' }}>
+            {settingsOpen ? '[-]' : '[+]'}
+          </span>
+        </div>
+        {settingsOpen && config && (
+          <div className="card-body">
+            <div className="setting-row">
+              <span className="setting-label">Trading Mode</span>
+              <div className="setting-input-group">
+                <button
+                  className={`btn ${config.dry_run ? 'btn-secondary' : 'btn-danger'}`}
+                  onClick={handleModeToggle}
+                  style={{ minWidth: 120 }}
+                >
+                  {config.dry_run ? 'Paper Mode' : 'LIVE MODE'}
+                </button>
+              </div>
+            </div>
+            <SettingInput label="Max Position" value={config.max_position_size} min={10} step={10} prefix="$" onChange={v => onConfigChange({ max_position_size: v })} />
+            <SettingInput label="Max Daily Loss" value={config.max_daily_loss} min={5} step={5} prefix="$" unlimited onChange={v => onConfigChange({ max_daily_loss: v })} />
+            <SettingInput label="Max Exposure" value={config.max_total_exposure} min={50} step={25} prefix="$" onChange={v => onConfigChange({ max_total_exposure: v })} />
+            <SettingInput label="Max Open Positions" value={config.max_open_orders} min={1} step={1} onChange={v => onConfigChange({ max_open_orders: v })} />
+            <SettingInput label="Min Confidence" value={config.min_confidence} min={10} step={5} suffix="%" onChange={v => onConfigChange({ min_confidence: v })} />
+            <SettingInput label="Min Expected Return" value={config.min_expected_return} min={0.5} step={0.5} suffix="%" onChange={v => onConfigChange({ min_expected_return: v })} />
+            <SettingInput label="Min Liquidity" value={config.min_liquidity} min={0} step={1000} prefix="$" onChange={v => onConfigChange({ min_liquidity: v })} />
+            <SettingInput label="Scan Interval" value={config.scan_interval} min={10} step={10} suffix="s" onChange={v => onConfigChange({ scan_interval: v })} />
+          </div>
+        )}
       </div>
     </div>
   );

@@ -233,7 +233,7 @@ export default function App() {
             </div>
           )}
           {stats?.last_updated && (
-            <span className="text-muted" style={{ fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase' }}>
+            <span className="text-muted" style={{ fontSize: 10 }}>
               Last: {formatTime(stats.last_updated)}
             </span>
           )}
@@ -252,34 +252,34 @@ export default function App() {
         {/* Error Banner */}
         {error && (
           <div style={{
-            background: 'rgba(255, 51, 51, 0.05)',
-            border: '1px solid var(--red-dim)',
-            padding: 'var(--sp-sm) var(--sp-md)',
-            marginBottom: 'var(--sp-md)',
-            color: 'var(--red)',
-            fontSize: '12px',
-            fontFamily: 'var(--font)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.5px',
+            background: '#ffffff',
+            border: '2px solid',
+            borderColor: '#dfdfdf #404040 #404040 #dfdfdf',
+            padding: '4px 8px',
+            marginBottom: 8,
+            color: '#ff0000',
+            fontSize: 11,
+            fontFamily: 'Tahoma, Arial, sans-serif',
+            fontWeight: 'bold',
           }}>
-            [ERROR] {error}
+            [Error] {error}
           </div>
         )}
 
         {/* Refresh Status Banner */}
         {refreshing && refreshStatus && (
           <div style={{
-            background: 'rgba(0, 212, 255, 0.05)',
-            border: '1px solid var(--cyan-dim)',
-            padding: 'var(--sp-sm) var(--sp-md)',
-            marginBottom: 'var(--sp-md)',
-            color: 'var(--cyan)',
+            background: '#ffffff',
+            border: '2px solid',
+            borderColor: '#808080 #ffffff #ffffff #808080',
+            padding: '4px 8px',
+            marginBottom: 8,
+            color: '#000080',
             display: 'flex',
             alignItems: 'center',
-            gap: 'var(--sp-sm)',
-            fontSize: '11px',
-            textTransform: 'uppercase',
-            letterSpacing: '1px',
+            gap: 4,
+            fontSize: 11,
+            fontFamily: 'Tahoma, Arial, sans-serif',
           }}>
             <div className="spinner" style={{ width: 14, height: 14 }} />
             {refreshStatus}
