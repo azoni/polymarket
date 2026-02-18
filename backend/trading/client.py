@@ -202,12 +202,26 @@ class PolymarketTrader:
             return []
 
     def get_balance(self) -> Optional[float]:
-        """Get USDC balance on Polygon."""
+        """Get USDC balance on Polygon via direct RPC call."""
         self._require_connection()
         try:
-            bal = self._client.get_balance_allowance()
-            if isinstance(bal, dict):
-                return float(bal.get("balance", 0)) / 1e6  # USDC has 6 decimals
+            import requests as _req
+            from eth_account import Account
+
+            acct = Account.from_key(self.config.private_key)
+            addr = acct.address.lower()[2:]
+
+            # USDC.e on Polygon — balanceOf(address)
+            usdc = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            data = "0x70a08231" + addr.zfill(64)
+
+            resp = _req.post("https://polygon.drpc.org", json={
+                "jsonrpc": "2.0", "method": "eth_call",
+                "params": [{"to": usdc, "data": data}, "latest"], "id": 1,
+            }, timeout=5)
+            r = resp.json()
+            if "result" in r:
+                return int(r["result"], 16) / 1e6
             return None
         except Exception as e:
             logger.error(f"Failed to get balance: {e}")

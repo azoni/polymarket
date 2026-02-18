@@ -7,6 +7,9 @@ Run with:
     uvicorn main:app --reload --port 8000
 """
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
@@ -59,6 +62,14 @@ app.include_router(trading_router, prefix="/api")
 # Create global trading bot instance (paper mode by default)
 bot = TradingBot()
 set_bot(bot)
+
+# Try connecting to Polymarket CLOB if credentials are available
+if bot.config.has_credentials:
+    connected = bot.trader.connect()
+    if connected:
+        logging.getLogger(__name__).info("Connected to Polymarket CLOB API")
+    else:
+        logging.getLogger(__name__).warning("Failed to connect to Polymarket CLOB — wallet features disabled")
 
 
 @app.get("/")
