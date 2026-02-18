@@ -19,6 +19,7 @@ class MarketCategory(str, Enum):
     ECONOMICS = "economics"
     ENTERTAINMENT = "entertainment"
     SCIENCE = "science"
+    LEGAL = "legal"
     OTHER = "other"
 
 
