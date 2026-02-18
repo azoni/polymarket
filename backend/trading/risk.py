@@ -59,6 +59,7 @@ class RiskManager:
         self.open_positions: dict[str, float] = {}  # token_id -> $ exposure
         self._current_date: date = date.today()
         self.paper_account = PaperAccount()
+        # Track total value (cash + positions) at day start, not just cash
         self._day_start_balance: float = self.paper_account.balance
 
     def _reset_daily(self):
@@ -67,14 +68,15 @@ class RiskManager:
         if today != self._current_date:
             logger.info(f"New trading day: {today}. Resetting daily counters.")
             self.trades_today.clear()
-            self._day_start_balance = self.paper_account.balance
+            self._day_start_balance = self.paper_account.balance + self.total_exposure
             self._current_date = today
 
     @property
     def daily_pnl(self) -> float:
-        """Today's P&L based on paper account balance delta."""
+        """Today's P&L based on total account value (cash + positions)."""
         self._reset_daily()
-        return self.paper_account.balance - self._day_start_balance
+        current_value = self.paper_account.balance + self.total_exposure
+        return current_value - self._day_start_balance
 
     @property
     def total_exposure(self) -> float:
@@ -166,6 +168,11 @@ class RiskManager:
 
         logger.info(f"Recorded {side} {size:.1f} @ ${price:.3f} = ${cost:.2f}. "
                      f"Exposure: ${self.total_exposure:.2f}, Open: {self.open_order_count}")
+
+    @property
+    def total_pnl(self) -> float:
+        """Total P&L including open position value."""
+        return (self.paper_account.balance + self.total_exposure) - self.paper_account.starting_balance
 
     def get_status(self) -> dict:
         """Current risk status for dashboard/logging."""

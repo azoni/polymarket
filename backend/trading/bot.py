@@ -232,7 +232,7 @@ class TradingBot:
             return {
                 "total_trades": 0, "avg_confidence": 0,
                 "total_cost": 0, "by_edge_type": {},
-                "pnl": round(self.risk.paper_account.pnl, 2),
+                "pnl": round(self.risk.total_pnl, 2),
             }
         total = len(self.trade_history)
         total_cost = sum(t["cost"] for t in self.trade_history)
@@ -257,7 +257,7 @@ class TradingBot:
             "total_cost": round(total_cost, 2),
             "avg_confidence": round(avg_confidence, 1),
             "by_edge_type": by_edge,
-            "pnl": round(self.risk.paper_account.pnl, 2),
+            "pnl": round(self.risk.total_pnl, 2),
         }
 
     def get_status(self) -> dict:
@@ -271,7 +271,11 @@ class TradingBot:
             "connected": self.trader.is_connected,
             "last_scan_at": self._last_scan_at,
             "signal_count": len(self.signal_history),
-            "balance": self.risk.paper_account.to_dict(),
+            "balance": {
+                **self.risk.paper_account.to_dict(),
+                "total_value": round(self.risk.paper_account.balance + self.risk.total_exposure, 2),
+                "pnl": round(self.risk.total_pnl, 2),
+            },
             "risk": risk,
             "balance_history": self.balance_history,
             "auto_scan": self._auto_scan,
