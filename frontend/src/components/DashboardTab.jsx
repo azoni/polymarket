@@ -2,7 +2,7 @@
  * DashboardTab — Two-column layout: main dashboard left, signals sidebar right.
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 const EDGE_TYPE_LABELS = {
@@ -10,6 +10,11 @@ const EDGE_TYPE_LABELS = {
   mispricing: { label: 'Mispricing', color: 'yellow' },
   volume_signal: { label: 'Vol Signal', color: 'purple' },
   liquidity_gap: { label: 'Liq Gap', color: 'blue' },
+  sentiment: { label: 'Sentiment', color: 'blue' },
+  correlation: { label: 'Correlation', color: 'purple' },
+  deadline_urgency: { label: 'Deadline', color: 'red' },
+  consensus_divergence: { label: 'Consensus', color: 'yellow' },
+  category_momentum: { label: 'Momentum', color: 'green' },
 };
 
 const EDGE_COLORS = {
@@ -17,6 +22,11 @@ const EDGE_COLORS = {
   mispricing: 'yellow',
   volume_signal: 'purple',
   liquidity_gap: 'blue',
+  sentiment: 'blue',
+  correlation: 'purple',
+  deadline_urgency: 'red',
+  consensus_divergence: 'yellow',
+  category_momentum: 'green',
 };
 
 const RISK_COLORS = {
@@ -25,21 +35,21 @@ const RISK_COLORS = {
   high: 'red',
 };
 
-const UNLIMITED = 999999;
-
 export function DashboardTab({
-  status, signals, scanning, onScan, config, onConfigChange, onReset,
+  status, signals, scanning, onScan, config, onReset,
   autoScanning, onAutoScanToggle,
 }) {
   const balance = status?.balance || { balance: 10000, starting_balance: 10000, pnl: 0 };
   const risk = status?.risk || {};
   const mode = status?.mode || 'paper';
   const pnl = balance.pnl || 0;
+  const totalValue = balance.total_value || (balance.balance + (risk.total_exposure || 0));
+  const walletBalance = status?.wallet_balance;
   const history = status?.balance_history || [];
   const positions = risk.position_details || {};
   const perf = status?.performance || { total_trades: 0, total_cost: 0, avg_confidence: 0, by_edge_type: {} };
+  const pnlPct = balance.starting_balance > 0 ? (pnl / balance.starting_balance * 100) : 0;
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedSignal, setExpandedSignal] = useState(null);
 
   const chartData = history.map(h => ({
@@ -65,22 +75,13 @@ export function DashboardTab({
 
   const positionEntries = Object.entries(positions);
 
-  const handleModeToggle = () => {
-    if (config?.dry_run) {
-      if (window.confirm('Switch to LIVE trading? Real money will be used.')) {
-        onConfigChange({ dry_run: false });
-      }
-    } else {
-      onConfigChange({ dry_run: true });
-    }
-  };
-
   const handleReset = () => {
     if (window.confirm('Reset paper account to $10,000? This clears all positions, signals, and P&L history.')) {
       onReset();
     }
   };
 
+  const UNLIMITED = 999999;
   const isUnlimitedVal = (val) => val >= UNLIMITED;
 
   const signalList = signals || [];
@@ -131,96 +132,126 @@ export function DashboardTab({
           </div>
         )}
 
-        {/* Account + Chart */}
-        <div className="dashboard-grid">
-          <div className="card">
-            <div className="card-header">
-              <h3>Account</h3>
-              <span className={`badge ${mode === 'paper' ? 'yellow' : 'red'}`}>
-                {mode === 'paper' ? 'Paper' : 'LIVE'}
-              </span>
-            </div>
-            <div className="card-body">
-              <div className="account-balance">
-                ${balance.balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
-              <div className="account-pnl">
-                <span className={pnl >= 0 ? 'text-green' : 'text-red'}>
-                  {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)} P&L
-                </span>
-                <span className="text-muted" style={{ marginLeft: 8 }}>
-                  from ${balance.starting_balance?.toLocaleString()}
-                </span>
-              </div>
-              <div className="metrics mt-md">
-                <div className="metric">
-                  <span className="label">Daily P&L</span>
-                  <span className={`value ${(risk.daily_pnl || 0) >= 0 ? 'text-green' : 'text-red'}`}>
-                    ${(risk.daily_pnl || 0).toFixed(2)}
+        {/* Portfolio Overview */}
+        <div className="portfolio-card card">
+          <div className="card-body" style={{ padding: 0 }}>
+            <div className="portfolio-top">
+              <div className="portfolio-value-section">
+                <div className="portfolio-label">
+                  Total Portfolio Value
+                  <span className={`badge ${mode === 'paper' ? 'yellow' : 'red'}`} style={{ marginLeft: 8 }}>
+                    {mode === 'paper' ? 'Paper' : 'LIVE'}
                   </span>
                 </div>
-                <div className="metric">
-                  <span className="label">Exposure</span>
-                  <span className="value">${(risk.total_exposure || 0).toFixed(0)}</span>
+                <div className="portfolio-value">
+                  ${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
-                <div className="metric">
-                  <span className="label">Positions</span>
-                  <span className="value">{risk.open_positions || 0}</span>
-                </div>
-                <div className="metric">
-                  <span className="label">Scans</span>
-                  <span className="value">{status?.cycles || 0}</span>
+                <div className="portfolio-pnl-row">
+                  <span className={`portfolio-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
+                    {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)} ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)
+                  </span>
+                  <span className="portfolio-pnl-label">all time</span>
+                  {(risk.daily_pnl != null && risk.daily_pnl !== 0) && (
+                    <>
+                      <span className="portfolio-pnl-sep">/</span>
+                      <span className={`portfolio-pnl ${(risk.daily_pnl || 0) >= 0 ? 'positive' : 'negative'}`}>
+                        {risk.daily_pnl >= 0 ? '+' : ''}{risk.daily_pnl.toFixed(2)}
+                      </span>
+                      <span className="portfolio-pnl-label">today</span>
+                    </>
+                  )}
                 </div>
               </div>
-              <button
-                className="btn btn-secondary mt-md"
-                onClick={handleReset}
-                style={{ width: '100%', justifyContent: 'center' }}
-              >
-                Reset Balance
-              </button>
+              <div className="portfolio-breakdown">
+                <div className="portfolio-breakdown-item">
+                  <span className="portfolio-breakdown-label">Available Cash</span>
+                  <span className="portfolio-breakdown-value">
+                    ${balance.balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="portfolio-breakdown-item">
+                  <span className="portfolio-breakdown-label">In Positions</span>
+                  <span className="portfolio-breakdown-value">
+                    ${(risk.total_exposure || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="portfolio-breakdown-item">
+                  <span className="portfolio-breakdown-label">Open Positions</span>
+                  <span className="portfolio-breakdown-value">{risk.open_positions || 0}</span>
+                </div>
+                {walletBalance?.balance != null && (
+                  <div className="portfolio-breakdown-item">
+                    <span className="portfolio-breakdown-label">Wallet (USDC)</span>
+                    <span className="portfolio-breakdown-value">
+                      ${walletBalance.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
 
-          <div className="card">
-            <div className="card-header">
-              <h3>Balance History</h3>
-              <span className="text-muted">{history.length} snapshots</span>
+            {/* Exposure bar */}
+            <div className="portfolio-bar-section">
+              <div className="portfolio-bar-row">
+                <span className="portfolio-bar-label">Capital Deployed</span>
+                <span className="portfolio-bar-value">
+                  {((risk.total_exposure || 0) / totalValue * 100).toFixed(0)}%
+                </span>
+              </div>
+              <div className="portfolio-bar-track">
+                <div
+                  className="portfolio-bar-fill"
+                  style={{ width: `${Math.min(100, ((risk.total_exposure || 0) / totalValue * 100))}%` }}
+                />
+              </div>
             </div>
-            <div className="card-body chart-container">
+
+            {/* Chart */}
+            <div className="portfolio-chart">
               {chartData.length < 2 ? (
-                <div className="empty-state">
+                <div className="empty-state" style={{ padding: '20px 0' }}>
                   <p className="text-muted">Run scans to start tracking balance over time</p>
                 </div>
               ) : (
-                <ResponsiveContainer width="100%" height={200}>
+                <ResponsiveContainer width="100%" height={160}>
                   <AreaChart data={chartData}>
                     <defs>
                       <linearGradient id="balanceGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={pnl >= 0 ? '#34d399' : '#f87171'} stopOpacity={0.2} />
+                        <stop offset="5%" stopColor={pnl >= 0 ? '#34d399' : '#f87171'} stopOpacity={0.15} />
                         <stop offset="95%" stopColor={pnl >= 0 ? '#34d399' : '#f87171'} stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <XAxis dataKey="time" stroke="#5a5a5d" fontSize={11} tickLine={false} axisLine={false} fontFamily="Inter, system-ui, sans-serif" />
+                    <XAxis dataKey="time" stroke="#5a5a5d" fontSize={10} tickLine={false} axisLine={false} fontFamily="Inter, system-ui, sans-serif" />
                     <YAxis
-                      stroke="#5a5a5d" fontSize={11} tickLine={false} axisLine={false}
+                      stroke="#5a5a5d" fontSize={10} tickLine={false} axisLine={false}
                       tickFormatter={v => `$${v.toLocaleString()}`}
                       domain={['dataMin - 50', 'dataMax + 50']}
                       fontFamily="Inter, system-ui, sans-serif"
+                      width={60}
                     />
                     <Tooltip
                       contentStyle={{ background: '#161618', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 8, fontFamily: 'Inter, system-ui, sans-serif', fontSize: 12, color: '#ececef', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}
                       labelStyle={{ color: '#8b8b8e' }}
-                      formatter={(value) => [`$${value.toLocaleString()}`, 'Balance']}
+                      formatter={(value) => [`$${value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 'Balance']}
                     />
                     <Area
                       type="monotone" dataKey="balance"
                       stroke={pnl >= 0 ? '#34d399' : '#f87171'}
-                      fill="url(#balanceGrad)" strokeWidth={2}
+                      fill="url(#balanceGrad)" strokeWidth={1.5}
                     />
                   </AreaChart>
                 </ResponsiveContainer>
               )}
+            </div>
+
+            {/* Bottom actions */}
+            <div className="portfolio-actions">
+              <span className="text-muted" style={{ fontSize: 11 }}>
+                Started at ${balance.starting_balance?.toLocaleString()} &middot; {status?.cycles || 0} scans
+              </span>
+              <button className="btn btn-secondary btn-sm" onClick={handleReset}>
+                Reset Account
+              </button>
             </div>
           </div>
         </div>
@@ -365,43 +396,6 @@ export function DashboardTab({
           </div>
         )}
 
-        {/* Settings (collapsible) */}
-        <div className="card settings-card">
-          <div
-            className="card-header"
-            style={{ cursor: 'pointer' }}
-            onClick={() => setSettingsOpen(!settingsOpen)}
-          >
-            <h3>Settings</h3>
-            <span className="text-muted" style={{ fontSize: 12 }}>
-              {settingsOpen ? 'Hide' : 'Show'}
-            </span>
-          </div>
-          {settingsOpen && config && (
-            <div className="card-body">
-              <div className="setting-row">
-                <span className="setting-label">Trading Mode</span>
-                <div className="setting-input-group">
-                  <button
-                    className={`btn ${config.dry_run ? 'btn-secondary' : 'btn-danger'}`}
-                    onClick={handleModeToggle}
-                    style={{ minWidth: 120 }}
-                  >
-                    {config.dry_run ? 'Paper Mode' : 'LIVE MODE'}
-                  </button>
-                </div>
-              </div>
-              <SettingInput label="Max Position" value={config.max_position_size} min={10} step={10} prefix="$" onChange={v => onConfigChange({ max_position_size: v })} />
-              <SettingInput label="Max Daily Loss" value={config.max_daily_loss} min={5} step={5} prefix="$" unlimited onChange={v => onConfigChange({ max_daily_loss: v })} />
-              <SettingInput label="Max Exposure" value={config.max_total_exposure} min={50} step={25} prefix="$" onChange={v => onConfigChange({ max_total_exposure: v })} />
-              <SettingInput label="Max Open Positions" value={config.max_open_orders} min={1} step={1} onChange={v => onConfigChange({ max_open_orders: v })} />
-              <SettingInput label="Min Confidence" value={config.min_confidence} min={10} step={5} suffix="%" onChange={v => onConfigChange({ min_confidence: v })} />
-              <SettingInput label="Min Expected Return" value={config.min_expected_return} min={0.5} step={0.5} suffix="%" onChange={v => onConfigChange({ min_expected_return: v })} />
-              <SettingInput label="Min Liquidity" value={config.min_liquidity} min={0} step={1000} prefix="$" onChange={v => onConfigChange({ min_liquidity: v })} />
-              <SettingInput label="Scan Interval" value={config.scan_interval} min={10} step={10} suffix="s" onChange={v => onConfigChange({ scan_interval: v })} />
-            </div>
-          )}
-        </div>
       </div>
 
       {/* ── Right: Signals Sidebar ── */}
@@ -501,78 +495,6 @@ export function DashboardTab({
             })
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function SettingInput({ label, value, min, step, prefix, suffix, unlimited, onChange }) {
-  const [local, setLocal] = useState(value);
-  const [isUnlimited, setIsUnlimited] = useState(value >= UNLIMITED);
-
-  useEffect(() => {
-    setLocal(value);
-    setIsUnlimited(value >= UNLIMITED);
-  }, [value]);
-
-  const commit = (val) => {
-    const clamped = Math.max(min, val);
-    setLocal(clamped);
-    onChange(clamped);
-  };
-
-  const handleBlur = () => {
-    if (isUnlimited) return;
-    commit(local);
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') e.target.blur();
-  };
-
-  const toggleUnlimited = () => {
-    if (isUnlimited) {
-      const defaultVal = min * 5;
-      setIsUnlimited(false);
-      setLocal(defaultVal);
-      onChange(defaultVal);
-    } else {
-      setIsUnlimited(true);
-      setLocal(UNLIMITED);
-      onChange(UNLIMITED);
-    }
-  };
-
-  return (
-    <div className="setting-row">
-      <span className="setting-label">{label}</span>
-      <div className="setting-input-group">
-        {isUnlimited ? (
-          <span className="setting-value-display">Unlimited</span>
-        ) : (
-          <div className="setting-number-wrap">
-            {prefix && <span className="setting-affix">{prefix}</span>}
-            <input
-              type="number"
-              className="setting-number"
-              value={local}
-              min={min}
-              step={step}
-              onChange={e => setLocal(Number(e.target.value))}
-              onBlur={handleBlur}
-              onKeyDown={handleKeyDown}
-            />
-            {suffix && <span className="setting-affix">{suffix}</span>}
-          </div>
-        )}
-        {unlimited && (
-          <button
-            className={`btn btn-sm ${isUnlimited ? 'btn-active' : 'btn-secondary'}`}
-            onClick={toggleUnlimited}
-          >
-            {isUnlimited ? 'Set Limit' : 'No Limit'}
-          </button>
-        )}
       </div>
     </div>
   );

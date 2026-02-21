@@ -5,3 +5,4 @@ export { PredictionCard } from './PredictionCard';
 export { ScoreBar } from './ScoreBar';
 export { DashboardTab } from './DashboardTab';
 export { ScannerTab } from './ScannerTab';
+export { ResearchTab } from './ResearchTab';

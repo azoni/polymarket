@@ -12,7 +12,6 @@ from core.detection import detect_all_edges
 from core.models import EdgeOpportunity, Market
 
 from .config import TradingConfig, trading_config
-from .client import PolymarketTrader
 from .risk import RiskManager
 
 logger = logging.getLogger(__name__)
@@ -38,36 +37,42 @@ class TradeSignal:
 
 class TradingStrategy:
     """
-    Scans Polymarket for edges and generates trade signals.
-    Uses the existing edge detection + additional filters.
+    Scans markets for edges and generates trade signals.
+    Works with both Polymarket and Kalshi via the exchange parameter.
     """
 
     def __init__(
         self,
-        trader: PolymarketTrader,
+        trader,
         risk: RiskManager,
-        config: Optional[TradingConfig] = None,
+        config=None,
+        exchange: str = "polymarket",
     ):
         self.trader = trader
         self.risk = risk
         self.config = config or trading_config
+        self.exchange = exchange
 
     def scan(self) -> list[TradeSignal]:
         """
         Full scan cycle:
-        1. Fetch markets from Polymarket Gamma API
+        1. Fetch markets from the configured exchange
         2. Run edge detection
         3. Filter by strategy thresholds
         4. Convert to trade signals
         """
-        logger.info("Scanning markets for opportunities...")
+        logger.info(f"Scanning {self.exchange} markets for opportunities...")
 
-        # Fetch and process markets using existing ingestion pipeline
+        # Fetch markets from the appropriate exchange
         try:
-            markets = ingest_markets(max_markets=100, min_volume=500)
-            logger.info(f"Fetched {len(markets)} markets")
+            if self.exchange == "kalshi":
+                from core.kalshi_ingestion import ingest_kalshi_markets
+                markets = ingest_kalshi_markets(max_markets=100, min_volume=0)
+            else:
+                markets = ingest_markets(max_markets=100, min_volume=500)
+            logger.info(f"Fetched {len(markets)} {self.exchange} markets")
         except Exception as e:
-            logger.error(f"Market fetch failed: {e}")
+            logger.error(f"Market fetch failed ({self.exchange}): {e}")
             return []
 
         # Run edge detection
@@ -88,6 +93,11 @@ class TradingStrategy:
         self, opp: EdgeOpportunity, markets: list[Market]
     ) -> Optional[TradeSignal]:
         """Evaluate a single opportunity and convert to a trade signal if it passes."""
+
+        # Filter: enabled edge types
+        edge_type_val = opp.edge_type.value if hasattr(opp.edge_type, 'value') else opp.edge_type
+        if hasattr(self.config, 'enabled_edge_types') and edge_type_val not in self.config.enabled_edge_types:
+            return None
 
         # Filter: confidence threshold
         if opp.confidence < self.config.min_confidence:
@@ -110,8 +120,10 @@ class TradingStrategy:
         if market.liquidity < self.config.min_liquidity:
             return None
 
-        # Filter: skip extreme-probability markets (untradeable)
-        if market.current_price < 0.05 or market.current_price > 0.95:
+        # Filter: price range (configurable)
+        min_p = getattr(self.config, 'min_price', 0.05)
+        max_p = getattr(self.config, 'max_price', 0.95)
+        if market.current_price < min_p or market.current_price > max_p:
             return None
 
         # Determine trade parameters from the edge type
@@ -119,8 +131,13 @@ class TradingStrategy:
         if not token_id:
             return None
 
-        # Size: scale with confidence, cap at max_position_size
-        raw_size = (opp.confidence / 100) * self.config.max_position_size
+        # Size: based on sizing_mode
+        sizing = getattr(self.config, 'sizing_mode', 'confidence')
+        if sizing == "fixed":
+            raw_size = self.config.max_position_size
+        else:
+            # Scale with confidence
+            raw_size = (opp.confidence / 100) * self.config.max_position_size
 
         # Reduce size if we already hold this token
         existing_pos = self.risk.open_positions.get(token_id)
@@ -141,7 +158,7 @@ class TradingStrategy:
             price=round(price, 3),
             size=size,
             market_question=market.question[:80],
-            edge_type=opp.edge_type.value,
+            edge_type=edge_type_val,
             confidence=opp.confidence,
             expected_return=opp.expected_return,
             reasoning=opp.reasoning,
@@ -156,24 +173,32 @@ class TradingStrategy:
     ) -> tuple[str, str, float]:
         """
         Determine which token to trade, direction, and price.
+        Uses config.price_aggressiveness for limit order offset.
         Returns (token_id, side, price) or ("", "", 0) if no trade.
         """
         if not market.tokens:
             return "", "", 0
 
+        aggr = getattr(self.config, 'price_aggressiveness', 0.99)
+        min_p = getattr(self.config, 'min_price', 0.05)
+        max_p = getattr(self.config, 'max_price', 0.95)
+
         yes_token = next((t for t in market.tokens if t.outcome == "Yes"), None)
         no_token = next((t for t in market.tokens if t.outcome == "No"), None)
 
-        if opp.edge_type.value == "arbitrage":
-            # For arbitrage: buy the cheaper side
+        edge_val = opp.edge_type.value if hasattr(opp.edge_type, 'value') else opp.edge_type
+
+        def _in_range(token):
+            return token and min_p < token.price < max_p
+
+        if edge_val == "arbitrage":
             if yes_token and no_token:
                 if yes_token.price < no_token.price:
                     return yes_token.token_id, "BUY", yes_token.price
                 else:
                     return no_token.token_id, "BUY", no_token.price
 
-        elif opp.edge_type.value == "mispricing":
-            # Buy underpriced or sell overpriced
+        elif edge_val == "mispricing":
             action = opp.suggested_action.lower()
             if "buy" in action and "yes" in action and yes_token:
                 return yes_token.token_id, "BUY", yes_token.price
@@ -182,28 +207,58 @@ class TradingStrategy:
             elif "sell" in action and yes_token:
                 return yes_token.token_id, "SELL", yes_token.price
 
-        elif opp.edge_type.value == "liquidity_gap":
-            # Provide liquidity — buy slightly below AMM price
-            # (CLOB books are mostly empty, AMM price is the reference)
+        elif edge_val == "liquidity_gap":
             tradeable = None
             for t in [yes_token, no_token]:
-                if t and 0.1 < t.price < 0.9:
+                if _in_range(t):
                     if tradeable is None or abs(t.price - 0.5) < abs(tradeable.price - 0.5):
                         tradeable = t
-
             if tradeable:
-                # Place limit order 1-2% below AMM price to capture spread
-                bid_price = tradeable.price * 0.985
-                if 0.05 < bid_price < 0.95:
+                # Liquidity gap uses slightly more aggressive offset
+                liq_aggr = min(aggr, 0.985)
+                bid_price = tradeable.price * liq_aggr
+                if min_p < bid_price < max_p:
                     return tradeable.token_id, "BUY", round(bid_price, 3)
 
-        elif opp.edge_type.value == "volume_signal":
-            # Volume spike with directional bias from detection
+        elif edge_val == "volume_signal":
             action = opp.suggested_action.lower()
-            if "yes" in action and yes_token and 0.15 < yes_token.price < 0.85:
-                return yes_token.token_id, "BUY", round(yes_token.price * 0.99, 3)
-            elif "no" in action and no_token and 0.15 < no_token.price < 0.85:
-                return no_token.token_id, "BUY", round(no_token.price * 0.99, 3)
+            if "yes" in action and _in_range(yes_token):
+                return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
+            elif "no" in action and _in_range(no_token):
+                return no_token.token_id, "BUY", round(no_token.price * aggr, 3)
+
+        elif edge_val == "sentiment":
+            action = opp.suggested_action.lower()
+            if "positive" in action and _in_range(yes_token):
+                return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
+            elif "negative" in action and _in_range(no_token):
+                return no_token.token_id, "BUY", round(no_token.price * aggr, 3)
+
+        elif edge_val == "consensus_divergence":
+            action = opp.suggested_action.lower()
+            if "buy yes" in action and _in_range(yes_token):
+                return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
+            elif "buy no" in action and _in_range(no_token):
+                return no_token.token_id, "BUY", round(no_token.price * aggr, 3)
+
+        elif edge_val == "deadline_urgency":
+            if market.current_price > 0.55 and _in_range(yes_token):
+                return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
+            elif market.current_price < 0.45 and _in_range(no_token):
+                return no_token.token_id, "BUY", round(no_token.price * aggr, 3)
+
+        elif edge_val == "correlation":
+            action = opp.suggested_action.lower()
+            if "follow" in action and _in_range(yes_token):
+                return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
+
+        elif edge_val == "category_momentum":
+            action = opp.suggested_action.lower()
+            trending_part = action.split("trending")[-1] if "trending" in action else ""
+            if "yes" in trending_part and _in_range(yes_token):
+                return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
+            elif _in_range(no_token):
+                return no_token.token_id, "BUY", round(no_token.price * aggr, 3)
 
         return "", "", 0
 

@@ -8,8 +8,9 @@ import logging
 import threading
 from datetime import datetime
 
-from .config import TradingConfig, trading_config
+from .config import TradingConfig, trading_config, KalshiConfig, kalshi_config
 from .client import PolymarketTrader
+from .kalshi_client import KalshiTrader
 from .risk import RiskManager
 from .strategy import TradingStrategy
 
@@ -19,17 +20,25 @@ logger = logging.getLogger(__name__)
 class TradingBot:
     """
     Autonomous trading bot that:
-    1. Connects to Polymarket CLOB
+    1. Connects to an exchange (Polymarket or Kalshi)
     2. Scans markets on an interval
     3. Runs edge detection
     4. Executes qualifying trades through risk management
     """
 
-    def __init__(self, config: TradingConfig = None):
-        self.config = config or trading_config
-        self.trader = PolymarketTrader(self.config)
+    def __init__(self, config=None, db=None, exchange: str = "polymarket"):
+        self.exchange = exchange
+        self.db = db
+
+        if exchange == "kalshi":
+            self.config = config or kalshi_config
+            self.trader = KalshiTrader(self.config)
+        else:
+            self.config = config or trading_config
+            self.trader = PolymarketTrader(self.config)
+
         self.risk = RiskManager(self.config)
-        self.strategy = TradingStrategy(self.trader, self.risk, self.config)
+        self.strategy = TradingStrategy(self.trader, self.risk, self.config, exchange=exchange)
         self._running = False
         self._cycles = 0
         self._scanning = False
@@ -40,26 +49,44 @@ class TradingBot:
         self._auto_scan = False
         self._auto_scan_thread: threading.Thread | None = None
 
+        # Load history from database on init
+        if self.db:
+            try:
+                saved_signals = self.db.get_signals(limit=100)
+                if saved_signals:
+                    self.signal_history = saved_signals
+                saved_trades = self.db.get_trades(limit=500)
+                if saved_trades:
+                    self.trade_history = saved_trades
+                saved_balance = self.db.get_balance_history(limit=500)
+                if saved_balance:
+                    self.balance_history = saved_balance
+                logger.info(f"Loaded from DB: {len(self.signal_history)} signals, "
+                           f"{len(self.trade_history)} trades, "
+                           f"{len(self.balance_history)} balance snapshots")
+            except Exception as e:
+                logger.warning(f"Could not load history from DB: {e}")
+
     def start(self):
         """Start the bot loop."""
         mode = "DRY RUN" if self.config.dry_run else "LIVE"
-        logger.info(f"Starting Polymarket Trading Bot [{mode}]")
+        logger.info(f"Starting {self.exchange.title()} Trading Bot [{mode}]")
         logger.info(f"  Max position: ${self.config.max_position_size}")
         logger.info(f"  Max daily loss: ${self.config.max_daily_loss}")
         logger.info(f"  Max exposure: ${self.config.max_total_exposure}")
         logger.info(f"  Min confidence: {self.config.min_confidence}%")
         logger.info(f"  Scan interval: {self.config.scan_interval}s")
 
-        # Connect to CLOB (skip in dry run if no credentials)
+        # Connect to exchange (skip in dry run if no credentials)
         if self.config.has_credentials:
             if not self.trader.connect():
-                logger.error("Failed to connect to Polymarket CLOB. Exiting.")
+                logger.error(f"Failed to connect to {self.exchange}. Exiting.")
                 return
         elif not self.config.dry_run:
             logger.error("No credentials configured and not in dry run mode. Exiting.")
             return
         else:
-            logger.warning("No credentials — running in DRY RUN mode (paper trading)")
+            logger.warning(f"No credentials — running {self.exchange} in DRY RUN mode (paper trading)")
 
         # Handle graceful shutdown
         self._running = True
@@ -156,6 +183,11 @@ class TradingBot:
                     "reason": results[i].get("reason", "") if i < len(results) else "",
                 }
                 self.signal_history.append(entry)
+                if self.db:
+                    try:
+                        self.db.save_signal(entry)
+                    except Exception as e:
+                        logger.warning(f"Failed to persist signal: {e}")
 
             # Cap at 100
             if len(self.signal_history) > 100:
@@ -166,7 +198,7 @@ class TradingBot:
                 status = results[i]["status"] if i < len(results) else "unknown"
                 if status in ("executed", "dry_run"):
                     cost = sig.price * sig.size
-                    self.trade_history.append({
+                    trade_entry = {
                         "timestamp": self._last_scan_at,
                         "market": sig.market_question,
                         "side": sig.side,
@@ -177,17 +209,31 @@ class TradingBot:
                         "confidence": sig.confidence,
                         "expected_return": sig.expected_return,
                         "token_id": sig.token_id,
-                    })
+                    }
+                    self.trade_history.append(trade_entry)
+                    if self.db:
+                        try:
+                            self.db.save_trade(trade_entry)
+                        except Exception as e:
+                            logger.warning(f"Failed to persist trade: {e}")
             if len(self.trade_history) > 500:
                 self.trade_history = self.trade_history[-500:]
 
             # Snapshot balance for P&L chart
             pa = self.risk.paper_account
-            self.balance_history.append({
+            snapshot = {
                 "timestamp": self._last_scan_at,
                 "balance": round(pa.balance, 2),
                 "pnl": round(pa.pnl, 2),
-            })
+            }
+            self.balance_history.append(snapshot)
+            if self.db:
+                try:
+                    self.db.save_balance_snapshot(
+                        snapshot["timestamp"], snapshot["balance"], snapshot["pnl"]
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to persist balance snapshot: {e}")
             if len(self.balance_history) > 500:
                 self.balance_history = self.balance_history[-500:]
 

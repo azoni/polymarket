@@ -7,9 +7,11 @@ from .models import (
 from .ingestion import ingest_markets
 from .detection import detect_all_edges
 from .research import AgentOrchestrator
+from .database import Database
 
 __all__ = [
     "Market", "Token", "EdgeOpportunity", "Prediction",
     "MarketCategory", "EdgeType", "DashboardStats",
-    "ingest_markets", "detect_all_edges", "AgentOrchestrator"
+    "ingest_markets", "detect_all_edges", "AgentOrchestrator",
+    "Database"
 ]

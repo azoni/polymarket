@@ -2,14 +2,22 @@
 Research Agents
 ===============
 Category-specific agents that analyze markets and produce predictions.
-Currently uses heuristics - designed to be extended with real data sources.
+Each agent:
+  1. Fetches external data (CoinGecko, ESPN, FRED, etc.)
+  2. Sends market question + data to Claude for probability estimation
+  3. Falls back to heuristics if ANTHROPIC_API_KEY not set
 """
 
-from typing import List, Optional
+import time
+from typing import List, Optional, Dict, Any
 from abc import ABC, abstractmethod
 import logging
 
 from .models import Market, Prediction, MarketCategory
+from .data_sources import (
+    politics_source, sports_source, crypto_source, economics_source, kalshi_source
+)
+from . import llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -20,243 +28,605 @@ logger = logging.getLogger(__name__)
 
 class ResearchAgent(ABC):
     """Base class for research agents."""
-    
+
     def __init__(self, name: str, categories: List[MarketCategory]):
         self.name = name
         self.categories = categories
-    
+
     @abstractmethod
     def can_analyze(self, market: Market) -> bool:
-        """Check if this agent can analyze the market."""
         pass
-    
+
     @abstractmethod
-    def analyze(self, market: Market) -> Prediction:
-        """Analyze market and produce prediction."""
+    def gather_data(self, market: Market) -> tuple:
+        """Gather external data. Returns (external_data_dict, sources_used_list)."""
         pass
-    
+
+    @abstractmethod
+    def heuristic_analyze(self, market: Market, external_data: Dict, sources: List[str]) -> Prediction:
+        """Fallback heuristic analysis when LLM is unavailable."""
+        pass
+
+    def _fetch_kalshi_data(self, market: Market, external_data: Dict, sources: List[str]):
+        """Cross-reference with Kalshi if a matching market exists."""
+        try:
+            kalshi_matches = kalshi_source.search_markets(market.question, limit=1)
+            if kalshi_matches:
+                best = kalshi_matches[0]
+                # Only use if match quality is good (>= 50% keyword match) and has a price
+                if best.get("yes_price") and best.get("match_ratio", 0) >= 0.5:
+                    external_data["kalshi"] = best
+                    sources.append("Kalshi")
+                    logger.info(f"Kalshi match: '{best.get('market_title', '')[:60]}' "
+                                f"({best['match_ratio']:.0%} match, price={best['yes_price']:.0%})")
+        except Exception as e:
+            logger.debug(f"Kalshi lookup failed: {e}")
+
+    def analyze(self, market: Market) -> Prediction:
+        """Full analysis: gather data → Kalshi cross-ref → LLM → fallback to heuristic."""
+        external_data, sources = self.gather_data(market)
+
+        # Cross-reference with Kalshi
+        self._fetch_kalshi_data(market, external_data, sources)
+
+        # Try LLM analysis first
+        if llm_client.is_available():
+            llm_result = llm_client.analyze_market(
+                question=market.question,
+                category=market.category.value if hasattr(market.category, 'value') else str(market.category),
+                current_price=market.current_price,
+                external_data=external_data,
+            )
+            if llm_result:
+                sources.append("Claude")
+                return self._llm_to_prediction(market, llm_result, sources)
+
+        # Fallback to heuristic
+        prediction = self.heuristic_analyze(market, external_data, sources)
+
+        # If Kalshi data exists, adjust prediction based on cross-platform divergence
+        kalshi = external_data.get("kalshi")
+        if kalshi and kalshi.get("yes_price"):
+            kalshi_price = kalshi["yes_price"]
+            poly_price = market.current_price
+            divergence = abs(kalshi_price - poly_price)
+            if divergence > 0.05:
+                # Significant cross-platform price difference
+                avg_price = (kalshi_price + poly_price) / 2
+                prediction.reasoning += (
+                    f" Kalshi prices this at {kalshi_price:.0%} vs Polymarket {poly_price:.0%} "
+                    f"({divergence:.0%} divergence)."
+                )
+                # Increase confidence when platforms agree, flag divergence when they don't
+                prediction.confidence = min(85, prediction.confidence + divergence * 100)
+
+        return prediction
+
+    def _llm_to_prediction(self, market: Market, llm: Dict, sources: List[str]) -> Prediction:
+        """Convert LLM result dict to a Prediction model."""
+        predicted = llm["probability"]
+        edge = predicted - market.current_price
+
+        return Prediction(
+            market_id=market.market_id,
+            market_question=market.question,
+            predicted_probability=round(predicted, 4),
+            current_price=market.current_price,
+            edge=round(edge, 4),
+            confidence=llm.get("confidence", 50),
+            confidence_low=max(0, predicted - 0.10),
+            confidence_high=min(1, predicted + 0.10),
+            direction=llm.get("direction", "hold"),
+            strength=llm.get("strength", "moderate"),
+            reasoning=llm.get("reasoning", ""),
+            key_risks=llm.get("key_risks", []),
+            catalysts=llm.get("catalysts", []),
+            data_sources=sources,
+        )
+
     def research(self, market: Market) -> Optional[Prediction]:
         """Full research pipeline."""
         if not self.can_analyze(market):
             return None
-        
         prediction = self.analyze(market)
         prediction.agent_name = self.name
+        prediction.polymarket_url = getattr(market, "polymarket_url", "")
         return prediction
 
 
 # =============================================================================
-# CATEGORY AGENTS
+# POLITICS AGENT
 # =============================================================================
 
 class PoliticsAgent(ResearchAgent):
-    """
-    Agent for political markets.
-    
-    Data sources (to implement):
-    - Polling aggregators (538, RCP)
-    - Prediction market comparisons
-    - News sentiment
-    """
-    
-    KEYWORDS = ["election", "president", "senate", "congress", "trump", "biden", 
-                "republican", "democrat", "governor", "vote"]
-    
+    """Political markets. Data: NewsAPI or Wikipedia."""
+
+    KEYWORDS = ["election", "president", "senate", "congress", "trump", "biden",
+                "republican", "democrat", "governor", "vote", "primary", "nominee"]
+
     def __init__(self):
         super().__init__("PoliticsAgent", [MarketCategory.POLITICS])
-    
+
     def can_analyze(self, market: Market) -> bool:
         if market.category == MarketCategory.POLITICS:
             return True
         q = market.question.lower()
         return any(kw in q for kw in self.KEYWORDS)
-    
-    def analyze(self, market: Market) -> Prediction:
-        # Placeholder: In production, fetch polls and expert forecasts
-        # For now, use market price with slight mean reversion assumption
-        
+
+    def gather_data(self, market: Market) -> tuple:
+        sources = []
+        data = {}
+        sentiment_data = politics_source.get_news_sentiment(market.question)
+        if sentiment_data:
+            sources.append(sentiment_data.get("source", "News"))
+            data["news_sentiment"] = sentiment_data
+        return data, sources
+
+    def heuristic_analyze(self, market: Market, external_data: Dict, sources: List[str]) -> Prediction:
         current = market.current_price
-        predicted = current + (0.03 * (0.5 - current))  # Slight mean reversion
+        reasoning_parts = []
+
+        sentiment_data = external_data.get("news_sentiment")
+        if sentiment_data:
+            sentiment = sentiment_data.get("sentiment", 0.0)
+            article_count = sentiment_data.get("articles", 0)
+            adjustment = sentiment * 0.08
+            predicted = max(0.02, min(0.98, current + adjustment))
+            confidence = min(70, 45 + article_count * 2 + abs(sentiment) * 15)
+
+            source = sentiment_data.get("source", "")
+            if source == "NewsAPI":
+                headlines = sentiment_data.get("headlines", [])
+                reasoning_parts.append(
+                    f"Based on {article_count} recent news articles (sentiment: {sentiment:+.2f}). "
+                    f"Top headline: \"{headlines[0][:80]}\"" if headlines else
+                    f"Based on {article_count} recent news articles (sentiment: {sentiment:+.2f})."
+                )
+            else:
+                context = sentiment_data.get("context", [])
+                reasoning_parts.append(
+                    f"Wikipedia context analyzed. {context[0][:100]}..." if context else
+                    "Limited context available from Wikipedia."
+                )
+        else:
+            predicted = current + (0.03 * (0.5 - current))
+            confidence = 35
+            reasoning_parts.append("No external data available. Using mean-reversion heuristic.")
+
         edge = predicted - current
-        
         if abs(edge) < 0.02:
             direction, strength = "hold", "weak"
         elif edge > 0:
-            direction = "buy_yes"
-            strength = "strong" if edge > 0.1 else "moderate"
+            direction, strength = "buy_yes", "strong" if edge > 0.08 else "moderate"
         else:
-            direction = "buy_no"
-            strength = "strong" if edge < -0.1 else "moderate"
-        
+            direction, strength = "buy_no", "strong" if edge < -0.08 else "moderate"
+
         return Prediction(
-            market_id=market.market_id,
-            market_question=market.question,
-            predicted_probability=predicted,
-            current_price=current,
-            edge=edge,
-            confidence=50,  # Low without real data
-            confidence_low=max(0, predicted - 0.15),
-            confidence_high=min(1, predicted + 0.15),
-            direction=direction,
-            strength=strength,
-            reasoning="Placeholder analysis. Would use polling data, historical patterns, and expert forecasts.",
+            market_id=market.market_id, market_question=market.question,
+            predicted_probability=round(predicted, 4), current_price=current,
+            edge=round(edge, 4), confidence=round(confidence),
+            confidence_low=max(0, predicted - 0.12), confidence_high=min(1, predicted + 0.12),
+            direction=direction, strength=strength,
+            reasoning=" ".join(reasoning_parts),
             key_risks=["Polling error", "Late-breaking news", "Turnout uncertainty"],
-            catalysts=["Debates", "Major endorsements", "News events"]
+            catalysts=["Debates", "Major endorsements", "News events"],
+            data_sources=sources,
         )
 
 
+# =============================================================================
+# SPORTS AGENT
+# =============================================================================
+
 class SportsAgent(ResearchAgent):
-    """
-    Agent for sports markets.
-    
-    Data sources (to implement):
-    - Team/player statistics
-    - Injury reports
-    - Vegas lines comparison
-    """
-    
-    KEYWORDS = ["nfl", "nba", "mlb", "nhl", "super bowl", "championship", 
-                "playoffs", "finals", "game", "match", "win"]
-    
+    """Sports markets. Data: Odds API or ESPN."""
+
+    KEYWORDS = ["nfl", "nba", "mlb", "nhl", "super bowl", "championship",
+                "playoffs", "finals", "game", "match", "win", "ufc", "fight"]
+
     def __init__(self):
         super().__init__("SportsAgent", [MarketCategory.SPORTS])
-    
+
     def can_analyze(self, market: Market) -> bool:
         if market.category == MarketCategory.SPORTS:
             return True
         q = market.question.lower()
         return any(kw in q for kw in self.KEYWORDS)
-    
-    def analyze(self, market: Market) -> Prediction:
+
+    def gather_data(self, market: Market) -> tuple:
+        sources = []
+        data = {}
+        sport, _ = sports_source.parse_sport_from_question(market.question)
+        data["sport"] = sport
+
+        if sport != "unknown":
+            odds_data = sports_source.get_odds(sport)
+            if odds_data:
+                sources.append(odds_data.get("source", "Sports"))
+                data["odds"] = odds_data
+        return data, sources
+
+    def heuristic_analyze(self, market: Market, external_data: Dict, sources: List[str]) -> Prediction:
         current = market.current_price
-        
+        reasoning_parts = []
+        odds_data = external_data.get("odds")
+
+        if odds_data:
+            events = odds_data.get("events", [])
+            source = odds_data.get("source", "")
+
+            if events and source == "OddsAPI":
+                best_match = self._match_event(market.question, events)
+                if best_match and best_match.get("odds"):
+                    odds = best_match["odds"]
+                    implied_probs = {}
+                    for team, american_odds in odds.items():
+                        implied_probs[team] = self._american_to_prob(american_odds)
+                    if implied_probs:
+                        max_team = max(implied_probs, key=implied_probs.get)
+                        vegas_prob = implied_probs[max_team]
+                        q = market.question.lower()
+                        predicted = vegas_prob if max_team.lower() in q else 1 - vegas_prob
+                        predicted = max(0.02, min(0.98, predicted))
+                        reasoning_parts.append(
+                            f"Vegas odds imply {max_team} at {vegas_prob:.0%}. "
+                            f"Polymarket at {current:.0%}."
+                        )
+                        confidence = min(75, 55 + abs(predicted - current) * 100)
+                    else:
+                        predicted, confidence = current, 40
+                        reasoning_parts.append("Odds data found but could not extract implied probabilities.")
+                else:
+                    predicted, confidence = current, 40
+                    reasoning_parts.append(f"Found {len(events)} events but no close match.")
+            elif events and source == "ESPN":
+                event = events[0]
+                reasoning_parts.append(
+                    f"ESPN: {event['home']} ({event.get('home_record', '')}) vs {event['away']} ({event.get('away_record', '')}). "
+                )
+                predicted = current + (0.02 * (0.5 - current))
+                confidence = 45
+            else:
+                predicted, confidence = current, 40
+                reasoning_parts.append(f"No upcoming events found.")
+        else:
+            predicted, confidence = current, 35
+            reasoning_parts.append("Could not identify sport or fetch data.")
+
+        edge = predicted - current
+        if abs(edge) < 0.02:
+            direction, strength = "hold", "weak"
+        elif edge > 0:
+            direction, strength = "buy_yes", "strong" if edge > 0.08 else "moderate"
+        else:
+            direction, strength = "buy_no", "strong" if edge < -0.08 else "moderate"
+
         return Prediction(
-            market_id=market.market_id,
-            market_question=market.question,
-            predicted_probability=current,
-            current_price=current,
-            edge=0,
-            confidence=40,
-            confidence_low=max(0, current - 0.2),
-            confidence_high=min(1, current + 0.2),
-            direction="hold",
-            strength="weak",
-            reasoning="Would use team statistics, injury reports, and Vegas lines.",
-            key_risks=["Injuries", "Weather", "Unexpected events"],
-            catalysts=["Injury updates", "Lineup announcements"]
+            market_id=market.market_id, market_question=market.question,
+            predicted_probability=round(predicted, 4), current_price=current,
+            edge=round(edge, 4), confidence=round(confidence),
+            confidence_low=max(0, predicted - 0.15), confidence_high=min(1, predicted + 0.15),
+            direction=direction, strength=strength,
+            reasoning=" ".join(reasoning_parts),
+            key_risks=["Injuries", "Weather", "Unexpected lineup changes"],
+            catalysts=["Injury updates", "Lineup announcements", "Recent form"],
+            data_sources=sources,
         )
 
+    def _match_event(self, question: str, events: list) -> Optional[dict]:
+        q = question.lower()
+        for event in events:
+            home = event.get("home", "").lower()
+            away = event.get("away", "").lower()
+            if (home and home in q) or (away and away in q):
+                return event
+        return events[0] if events else None
+
+    def _american_to_prob(self, odds: int) -> float:
+        try:
+            odds = int(odds)
+            return 100 / (odds + 100) if odds > 0 else abs(odds) / (abs(odds) + 100)
+        except (ValueError, ZeroDivisionError):
+            return 0.5
+
+
+# =============================================================================
+# CRYPTO AGENT
+# =============================================================================
 
 class CryptoAgent(ResearchAgent):
-    """
-    Agent for crypto markets.
-    
-    Data sources (to implement):
-    - On-chain analytics
-    - Price data
-    - Sentiment indicators
-    """
-    
-    KEYWORDS = ["bitcoin", "btc", "ethereum", "eth", "crypto", "solana", 
-                "sol", "token", "halving"]
-    
+    """Crypto markets. Data: CoinGecko + Fear & Greed Index."""
+
+    KEYWORDS = ["bitcoin", "btc", "ethereum", "eth", "crypto", "solana",
+                "sol", "token", "halving", "xrp", "dogecoin", "doge"]
+
     def __init__(self):
         super().__init__("CryptoAgent", [MarketCategory.CRYPTO])
-    
+
     def can_analyze(self, market: Market) -> bool:
         if market.category == MarketCategory.CRYPTO:
             return True
         q = market.question.lower()
         return any(kw in q for kw in self.KEYWORDS)
-    
-    def analyze(self, market: Market) -> Prediction:
+
+    def gather_data(self, market: Market) -> tuple:
+        sources = []
+        data = {}
+        asset = crypto_source.extract_crypto_asset(market.question)
+        data["asset"] = asset
+
+        if asset:
+            price_data = crypto_source.get_price_data(asset, days=30)
+            if price_data:
+                sources.append("CoinGecko")
+                data["price"] = price_data
+
+            fng = crypto_source.get_fear_greed_index()
+            if fng:
+                sources.append("Fear & Greed Index")
+                data["fear_greed"] = fng
+
+            target = crypto_source.parse_price_target(market.question)
+            if target:
+                data["price_target"] = target
+
+        return data, sources
+
+    def _is_dip_question(self, question: str) -> bool:
+        """Detect if the question asks about a price DROP (vs a price rise)."""
+        q = question.lower()
+        dip_words = ["dip", "drop", "fall", "crash", "below", "under", "sink", "decline", "plunge"]
+        return any(w in q for w in dip_words)
+
+    def heuristic_analyze(self, market: Market, external_data: Dict, sources: List[str]) -> Prediction:
         current = market.current_price
-        
+        reasoning_parts = []
+        asset = external_data.get("asset")
+        price_data = external_data.get("price")
+        fng = external_data.get("fear_greed")
+        target = external_data.get("price_target")
+
+        if asset and price_data:
+            change_7d = price_data.get("change_7d_pct", 0)
+            change_30d = price_data.get("change_30d_pct", 0)
+            current_crypto_price = price_data.get("current_price", 0)
+            reasoning_parts.append(
+                f"{asset.capitalize()} at ${current_crypto_price:,.0f}. "
+                f"7d: {change_7d:+.1f}%, 30d: {change_30d:+.1f}%."
+            )
+
+            if target and current_crypto_price > 0:
+                is_dip = self._is_dip_question(market.question)
+                distance_pct = (target - current_crypto_price) / current_crypto_price * 100
+
+                if is_dip:
+                    # Question asks about price DROPPING to target
+                    if distance_pct >= 0:
+                        # Already below target — dip already happened
+                        predicted = max(0.7, min(0.95, 0.85))
+                        reasoning_parts.append(f"Already below target ${target:,.0f}. Dip has occurred.")
+                    elif abs(distance_pct) < 15:
+                        # Close to dipping — moderate probability
+                        momentum_factor = max(-0.1, min(0.1, change_7d / 100))
+                        predicted = max(0.2, min(0.6, 0.4 + momentum_factor))
+                        reasoning_parts.append(f"Only {abs(distance_pct):.0f}% above dip target ${target:,.0f}.")
+                    elif abs(distance_pct) < 40:
+                        # Would need a significant drop
+                        predicted = max(0.05, min(0.25, 0.15 - change_30d / 500))
+                        reasoning_parts.append(f"Needs {abs(distance_pct):.0f}% drop to reach ${target:,.0f}. Unlikely in short term.")
+                    else:
+                        # Massive drop required
+                        predicted = max(0.02, min(0.1, 0.05))
+                        reasoning_parts.append(f"Would need {abs(distance_pct):.0f}% crash to ${target:,.0f}. Extremely unlikely.")
+                else:
+                    # Question asks about price REACHING/RISING to target
+                    if distance_pct <= 0:
+                        predicted = max(0.7, min(0.95, current + 0.1))
+                        reasoning_parts.append(f"Already above target ${target:,.0f}.")
+                    elif distance_pct < 10:
+                        predicted = max(0.4, min(0.85, 0.6 + change_7d / 100))
+                        reasoning_parts.append(f"Within {distance_pct:.0f}% of target ${target:,.0f}.")
+                    elif distance_pct < 30:
+                        predicted = max(0.15, min(0.6, 0.35 + change_30d / 200))
+                        reasoning_parts.append(f"{distance_pct:.0f}% below target ${target:,.0f}.")
+                    else:
+                        predicted = max(0.05, min(0.3, 0.15 + change_30d / 300))
+                        reasoning_parts.append(f"Significant distance ({distance_pct:.0f}%) to target ${target:,.0f}.")
+                confidence = min(70, 50 + abs(predicted - current) * 50)
+            else:
+                momentum = (change_7d + change_30d / 2) / 100
+                predicted = max(0.05, min(0.95, current + momentum * 0.15))
+                confidence = min(60, 40 + abs(change_7d) * 0.5)
+                reasoning_parts.append("Using momentum-based prediction.")
+        else:
+            predicted, confidence = current, 30
+            reasoning_parts.append("Could not identify crypto asset.")
+
+        if fng:
+            fng_value = fng.get("value", 50)
+            fng_class = fng.get("classification", "Neutral")
+            reasoning_parts.append(f"Fear & Greed: {fng_value} ({fng_class}).")
+            if fng_value < 25:
+                predicted = min(0.95, predicted + 0.03)
+            elif fng_value > 75:
+                predicted = max(0.05, predicted - 0.03)
+
+        predicted = max(0.02, min(0.98, predicted))
+        edge = predicted - current
+        if abs(edge) < 0.02:
+            direction, strength = "hold", "weak"
+        elif edge > 0:
+            direction, strength = "buy_yes", "strong" if edge > 0.08 else "moderate"
+        else:
+            direction, strength = "buy_no", "strong" if edge < -0.08 else "moderate"
+
         return Prediction(
-            market_id=market.market_id,
-            market_question=market.question,
-            predicted_probability=current,
-            current_price=current,
-            edge=0,
-            confidence=35,
-            confidence_low=max(0, current - 0.25),
-            confidence_high=min(1, current + 0.25),
-            direction="hold",
-            strength="weak",
-            reasoning="Would use price technicals, on-chain metrics, and sentiment.",
+            market_id=market.market_id, market_question=market.question,
+            predicted_probability=round(predicted, 4), current_price=current,
+            edge=round(edge, 4), confidence=round(confidence),
+            confidence_low=max(0, predicted - 0.18), confidence_high=min(1, predicted + 0.18),
+            direction=direction, strength=strength,
+            reasoning=" ".join(reasoning_parts),
             key_risks=["Volatility", "Regulatory news", "Market manipulation"],
-            catalysts=["ETF decisions", "Protocol upgrades", "Macro events"]
+            catalysts=["ETF decisions", "Protocol upgrades", "Macro events"],
+            data_sources=sources,
         )
 
 
+# =============================================================================
+# ECONOMICS AGENT
+# =============================================================================
+
 class EconomicsAgent(ResearchAgent):
-    """
-    Agent for economics markets.
-    
-    Data sources (to implement):
-    - FRED data
-    - Fed communications
-    - Futures markets
-    """
-    
-    KEYWORDS = ["fed", "interest rate", "inflation", "gdp", "unemployment", 
-                "recession", "cpi", "fomc"]
-    
+    """Economics markets. Data: FRED API or Treasury.gov."""
+
+    KEYWORDS = ["fed", "interest rate", "inflation", "gdp", "unemployment",
+                "recession", "cpi", "fomc", "treasury", "rate cut", "rate hike"]
+
     def __init__(self):
         super().__init__("EconomicsAgent", [MarketCategory.ECONOMICS])
-    
+
     def can_analyze(self, market: Market) -> bool:
         if market.category == MarketCategory.ECONOMICS:
             return True
         q = market.question.lower()
         return any(kw in q for kw in self.KEYWORDS)
-    
-    def analyze(self, market: Market) -> Prediction:
+
+    def gather_data(self, market: Market) -> tuple:
+        sources = []
+        data = {}
+        indicator = economics_source.identify_indicator(market.question)
+        data["indicator"] = indicator
+
+        if indicator:
+            fred_data = economics_source.get_fred_series(indicator)
+            if fred_data:
+                sources.append("FRED")
+                data["fred"] = fred_data
+
+        treasury = economics_source.get_treasury_rates()
+        if treasury:
+            sources.append("Treasury.gov")
+            data["treasury"] = treasury
+
+        return data, sources
+
+    def heuristic_analyze(self, market: Market, external_data: Dict, sources: List[str]) -> Prediction:
         current = market.current_price
-        
+        reasoning_parts = []
+        indicator = external_data.get("indicator")
+        fred_data = external_data.get("fred")
+        treasury = external_data.get("treasury")
+
+        if fred_data:
+            latest = fred_data.get("latest_value")
+            prev = fred_data.get("previous_value")
+            trend = fred_data.get("trend", "stable")
+            change = fred_data.get("change", 0)
+            reasoning_parts.append(
+                f"FRED {indicator}: latest {latest}, previous {prev} ({trend}, change: {change:+.3f})."
+            )
+            q_lower = market.question.lower()
+            if "cut" in q_lower or "lower" in q_lower:
+                predicted = min(0.95, current + 0.06) if trend == "falling" else max(0.05, current - 0.04)
+                reasoning_parts.append("Trend supports this direction." if trend == "falling" else "Trend is against.")
+            elif "hike" in q_lower or "raise" in q_lower or "higher" in q_lower:
+                predicted = min(0.95, current + 0.06) if trend == "rising" else max(0.05, current - 0.04)
+                reasoning_parts.append("Trend supports this direction." if trend == "rising" else "Trend is against.")
+            else:
+                momentum = 0.04 if trend == "rising" else -0.04 if trend == "falling" else 0
+                predicted = max(0.05, min(0.95, current + momentum))
+            confidence = min(72, 55 + abs(change) * 10)
+        else:
+            predicted, confidence = current, 45
+            if indicator:
+                reasoning_parts.append(f"No FRED data available for {indicator}.")
+
+        if treasury:
+            rates = treasury.get("rates", {})
+            if rates:
+                rate_info = ", ".join([f"{k}: {v:.2f}%" for k, v in list(rates.items())[:3]])
+                reasoning_parts.append(f"Treasury rates: {rate_info}.")
+
+        if not sources:
+            predicted, confidence = current, 40
+            reasoning_parts.append("No external economic data available.")
+
+        predicted = max(0.02, min(0.98, predicted))
+        edge = predicted - current
+        if abs(edge) < 0.02:
+            direction, strength = "hold", "weak"
+        elif edge > 0:
+            direction, strength = "buy_yes", "strong" if edge > 0.08 else "moderate"
+        else:
+            direction, strength = "buy_no", "strong" if edge < -0.08 else "moderate"
+
         return Prediction(
-            market_id=market.market_id,
-            market_question=market.question,
-            predicted_probability=current,
-            current_price=current,
-            edge=0,
-            confidence=60,
-            confidence_low=max(0, current - 0.1),
-            confidence_high=min(1, current + 0.1),
-            direction="hold",
-            strength="weak",
-            reasoning="Would use FRED data, Fed communications, and futures implied probabilities.",
+            market_id=market.market_id, market_question=market.question,
+            predicted_probability=round(predicted, 4), current_price=current,
+            edge=round(edge, 4), confidence=round(confidence),
+            confidence_low=max(0, predicted - 0.08), confidence_high=min(1, predicted + 0.08),
+            direction=direction, strength=strength,
+            reasoning=" ".join(reasoning_parts),
             key_risks=["Data revisions", "Fed pivot", "External shocks"],
-            catalysts=["FOMC meetings", "CPI releases", "Jobs reports"]
+            catalysts=["FOMC meetings", "CPI releases", "Jobs reports"],
+            data_sources=sources,
         )
 
 
+# =============================================================================
+# GENERAL AGENT
+# =============================================================================
+
 class GeneralAgent(ResearchAgent):
-    """Fallback agent for uncategorized markets."""
-    
+    """Fallback agent. Data: Wikipedia context."""
+
     def __init__(self):
         super().__init__("GeneralAgent", [MarketCategory.OTHER])
-    
+
     def can_analyze(self, market: Market) -> bool:
-        return True  # Catches everything else
-    
-    def analyze(self, market: Market) -> Prediction:
+        return True
+
+    def gather_data(self, market: Market) -> tuple:
+        sources = []
+        data = {}
+        context = politics_source._wikipedia_context(market.question)
+        if context and context.get("context"):
+            sources.append("Wikipedia")
+            data["wikipedia"] = context
+        return data, sources
+
+    def heuristic_analyze(self, market: Market, external_data: Dict, sources: List[str]) -> Prediction:
         current = market.current_price
-        
+        reasoning_parts = []
+        wiki = external_data.get("wikipedia")
+
+        if wiki:
+            snippets = wiki.get("context", [])
+            reasoning_parts.append(f"Wikipedia context: {snippets[0][:120]}..." if snippets else "")
+            predicted = current + (0.02 * (0.5 - current))
+            confidence = 35
+        else:
+            predicted, confidence = current, 25
+            reasoning_parts.append("No matching context. Requires manual research.")
+
+        edge = predicted - current
+        if abs(edge) < 0.02:
+            direction, strength = "hold", "weak"
+        elif edge > 0:
+            direction, strength = "buy_yes", "weak"
+        else:
+            direction, strength = "buy_no", "weak"
+
         return Prediction(
-            market_id=market.market_id,
-            market_question=market.question,
-            predicted_probability=current,
-            current_price=current,
-            edge=0,
-            confidence=30,
-            confidence_low=max(0, current - 0.3),
-            confidence_high=min(1, current + 0.3),
-            direction="hold",
-            strength="weak",
-            reasoning="Uncategorized market. Requires manual research.",
-            key_risks=["Unknown factors"],
-            catalysts=["Varies"]
+            market_id=market.market_id, market_question=market.question,
+            predicted_probability=round(predicted, 4), current_price=current,
+            edge=round(edge, 4), confidence=round(confidence),
+            confidence_low=max(0, predicted - 0.25), confidence_high=min(1, predicted + 0.25),
+            direction=direction, strength=strength,
+            reasoning=" ".join(reasoning_parts),
+            key_risks=["Unknown factors"], catalysts=["Varies"],
+            data_sources=sources,
         )
 
 
@@ -265,51 +635,90 @@ class GeneralAgent(ResearchAgent):
 # =============================================================================
 
 class AgentOrchestrator:
-    """Coordinates research agents."""
-    
+    """Coordinates research agents and logs activity."""
+
     def __init__(self):
-        # Order matters - more specific agents first
         self.agents = [
             PoliticsAgent(),
             SportsAgent(),
             CryptoAgent(),
             EconomicsAgent(),
-            GeneralAgent()  # Fallback
+            GeneralAgent()
         ]
-    
+        self.db = None
+
     def find_agent(self, market: Market) -> ResearchAgent:
-        """Find the best agent for a market."""
         for agent in self.agents:
             if agent.can_analyze(market):
                 return agent
-        return self.agents[-1]  # GeneralAgent fallback
-    
+        return self.agents[-1]
+
     def research_market(self, market: Market) -> Prediction:
-        """Research a single market."""
         agent = self.find_agent(market)
-        return agent.research(market)
-    
-    def research_markets(self, markets: List[Market], min_edge: float = 0.0) -> List[Prediction]:
-        """
-        Research multiple markets.
-        
-        Args:
-            markets: List of markets to research
-            min_edge: Minimum absolute edge to include
-        
-        Returns:
-            List of predictions sorted by absolute edge
-        """
+        start = time.time()
+        prediction = agent.research(market)
+        duration_ms = (time.time() - start) * 1000
+
+        if self.db and prediction:
+            try:
+                self.db.log_agent_activity(
+                    agent_name=agent.name,
+                    market_id=market.market_id,
+                    market_question=market.question[:100],
+                    action="analyze",
+                    data_source=", ".join(prediction.data_sources) if prediction.data_sources else "",
+                    success=True,
+                    duration_ms=round(duration_ms, 1),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to log agent activity: {e}")
+
+        return prediction
+
+    def research_markets(
+        self, markets: List[Market], min_edge: float = 0.0
+    ) -> List[Prediction]:
         predictions = []
-        
+        llm_mode = "LLM" if llm_client.is_available() else "heuristic"
+        logger.info(f"Researching {len(markets)} markets (mode: {llm_mode})")
+
         for market in markets:
-            pred = self.research_market(market)
-            if pred and abs(pred.edge) >= min_edge:
-                predictions.append(pred)
-        
-        # Sort by absolute edge
+            try:
+                pred = self.research_market(market)
+                if pred and abs(pred.edge) >= min_edge:
+                    predictions.append(pred)
+            except Exception as e:
+                logger.error(f"Agent error for {market.market_id}: {e}")
+                if self.db:
+                    agent = self.find_agent(market)
+                    self.db.log_agent_activity(
+                        agent_name=agent.name,
+                        market_id=market.market_id,
+                        market_question=market.question[:100],
+                        action="analyze",
+                        success=False,
+                        details=str(e),
+                    )
+
         predictions.sort(key=lambda p: abs(p.edge), reverse=True)
-        
-        logger.info(f"Generated {len(predictions)} predictions")
-        
+        logger.info(f"Generated {len(predictions)} predictions ({llm_mode})")
         return predictions
+
+    def get_agent_health(self) -> List[dict]:
+        result = []
+        for agent in self.agents:
+            status = "online"
+            if self.db:
+                stats = self.db.get_agent_activity(agent_name=agent.name, limit=10)
+                if not stats:
+                    status = "idle"
+                else:
+                    recent_failures = sum(1 for s in stats if not s.get("success", True))
+                    if recent_failures > len(stats) * 0.5:
+                        status = "degraded"
+            result.append({
+                "name": agent.name,
+                "status": status,
+                "categories": [c.value for c in agent.categories],
+            })
+        return result

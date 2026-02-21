@@ -46,8 +46,11 @@ async function request(endpoint, options = {}) {
 /**
  * Get dashboard statistics.
  */
-export async function getStats() {
-  return request('/stats');
+export async function getStats(exchange) {
+  const params = new URLSearchParams();
+  if (exchange) params.append('exchange', exchange);
+  const query = params.toString();
+  return request(`/stats${query ? `?${query}` : ''}`);
 }
 
 /**
@@ -60,7 +63,7 @@ export async function getStatus() {
 /**
  * Get markets with optional filters.
  */
-export async function getMarkets({ category, minScore, minVolume, sortBy, search, limit, offset } = {}) {
+export async function getMarkets({ category, minScore, minVolume, sortBy, search, limit, offset, exchange } = {}) {
   const params = new URLSearchParams();
   if (category) params.append('category', category);
   if (minScore) params.append('min_score', minScore);
@@ -69,6 +72,7 @@ export async function getMarkets({ category, minScore, minVolume, sortBy, search
   if (search) params.append('search', search);
   if (limit) params.append('limit', limit);
   if (offset) params.append('offset', offset);
+  if (exchange) params.append('exchange', exchange);
 
   const query = params.toString();
   return request(`/markets${query ? `?${query}` : ''}`);
@@ -84,13 +88,14 @@ export async function getMarket(marketId) {
 /**
  * Get edge opportunities with optional filters.
  */
-export async function getOpportunities({ edgeType, minConfidence, riskLevel, limit } = {}) {
+export async function getOpportunities({ edgeType, minConfidence, riskLevel, limit, exchange } = {}) {
   const params = new URLSearchParams();
   if (edgeType) params.append('edge_type', edgeType);
   if (minConfidence) params.append('min_confidence', minConfidence);
   if (riskLevel) params.append('risk_level', riskLevel);
   if (limit) params.append('limit', limit);
-  
+  if (exchange) params.append('exchange', exchange);
+
   const query = params.toString();
   return request(`/opportunities${query ? `?${query}` : ''}`);
 }
@@ -98,12 +103,13 @@ export async function getOpportunities({ edgeType, minConfidence, riskLevel, lim
 /**
  * Get research predictions.
  */
-export async function getPredictions({ direction, minEdge, limit } = {}) {
+export async function getPredictions({ direction, minEdge, limit, exchange } = {}) {
   const params = new URLSearchParams();
   if (direction) params.append('direction', direction);
   if (minEdge) params.append('min_edge', minEdge);
   if (limit) params.append('limit', limit);
-  
+  if (exchange) params.append('exchange', exchange);
+
   const query = params.toString();
   return request(`/predictions${query ? `?${query}` : ''}`);
 }
@@ -129,38 +135,45 @@ export async function getMarketEdges(marketId) {
 }
 
 /**
+ * Get available trading exchanges.
+ */
+export async function getExchanges() {
+  return request('/trading/exchanges');
+}
+
+/**
  * Get trading bot status (balance, risk, mode).
  */
-export async function getTradingStatus() {
-  return request('/trading/status');
+export async function getTradingStatus(exchange = 'polymarket') {
+  return request(`/trading/${exchange}/status`);
 }
 
 /**
  * Get recent trade signals.
  */
-export async function getTradingSignals() {
-  return request('/trading/signals');
+export async function getTradingSignals(exchange = 'polymarket') {
+  return request(`/trading/${exchange}/signals`);
 }
 
 /**
  * Trigger a manual scan cycle.
  */
-export async function triggerScan() {
-  return request('/trading/scan', { method: 'POST' });
+export async function triggerScan(exchange = 'polymarket') {
+  return request(`/trading/${exchange}/scan`, { method: 'POST' });
 }
 
 /**
  * Get trading bot config (non-secret fields).
  */
-export async function getTradingConfig() {
-  return request('/trading/config');
+export async function getTradingConfig(exchange = 'polymarket') {
+  return request(`/trading/${exchange}/config`);
 }
 
 /**
  * Update trading bot config (partial update).
  */
-export async function updateTradingConfig(updates) {
-  return request('/trading/config', {
+export async function updateTradingConfig(updates, exchange = 'polymarket') {
+  return request(`/trading/${exchange}/config`, {
     method: 'PUT',
     body: JSON.stringify(updates),
   });
@@ -169,22 +182,47 @@ export async function updateTradingConfig(updates) {
 /**
  * Reset paper account balance and clear all trading state.
  */
-export async function resetBalance() {
-  return request('/trading/reset', { method: 'POST' });
+export async function resetBalance(exchange = 'polymarket') {
+  return request(`/trading/${exchange}/reset`, { method: 'POST' });
 }
 
-export async function startAutoScan() {
-  return request('/trading/auto-scan/start', { method: 'POST' });
+export async function startAutoScan(exchange = 'polymarket') {
+  return request(`/trading/${exchange}/auto-scan/start`, { method: 'POST' });
 }
 
-export async function stopAutoScan() {
-  return request('/trading/auto-scan/stop', { method: 'POST' });
+export async function stopAutoScan(exchange = 'polymarket') {
+  return request(`/trading/${exchange}/auto-scan/stop`, { method: 'POST' });
 }
 
-export async function getPerformance() {
-  return request('/trading/performance');
+export async function getPerformance(exchange = 'polymarket') {
+  return request(`/trading/${exchange}/performance`);
 }
 
-export async function getTradeHistory() {
-  return request('/trading/trades');
+export async function getTradeHistory(exchange = 'polymarket') {
+  return request(`/trading/${exchange}/trades`);
+}
+
+/**
+ * Get research agent status (health, last run, data sources).
+ */
+export async function getAgentStatus() {
+  return request('/agents/status');
+}
+
+/**
+ * Get recent agent activity log.
+ */
+export async function getAgentActivity({ agentName, limit } = {}) {
+  const params = new URLSearchParams();
+  if (agentName) params.append('agent_name', agentName);
+  if (limit) params.append('limit', limit);
+  const query = params.toString();
+  return request(`/agents/activity${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Trigger research for a single market.
+ */
+export async function researchMarket(marketId) {
+  return request(`/agents/research/${marketId}`, { method: 'POST' });
 }

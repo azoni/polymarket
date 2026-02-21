@@ -29,6 +29,11 @@ class EdgeType(str, Enum):
     MISPRICING = "mispricing"
     VOLUME_SIGNAL = "volume_signal"
     LIQUIDITY_GAP = "liquidity_gap"
+    SENTIMENT = "sentiment"
+    CORRELATION = "correlation"
+    DEADLINE_URGENCY = "deadline_urgency"
+    CONSENSUS_DIVERGENCE = "consensus_divergence"
+    CATEGORY_MOMENTUM = "category_momentum"
 
 
 class Token(BaseModel):
@@ -123,6 +128,10 @@ class Prediction(BaseModel):
     
     # Agent info
     agent_name: str = ""
+    data_sources: List[str] = Field(default_factory=list)
+
+    # Links
+    polymarket_url: str = ""
 
 
 class DashboardStats(BaseModel):

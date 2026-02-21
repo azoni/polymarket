@@ -34,6 +34,11 @@ const EDGE_TYPE_LABELS = {
   mispricing: { label: 'Mispricing', color: 'yellow' },
   volume_signal: { label: 'Volume Signal', color: 'purple' },
   liquidity_gap: { label: 'Liquidity Gap', color: 'blue' },
+  sentiment: { label: 'Sentiment', color: 'blue' },
+  correlation: { label: 'Correlation', color: 'purple' },
+  deadline_urgency: { label: 'Deadline', color: 'red' },
+  consensus_divergence: { label: 'Consensus', color: 'yellow' },
+  category_momentum: { label: 'Momentum', color: 'green' },
 };
 
 const DIRECTION_INFO = {
@@ -44,7 +49,7 @@ const DIRECTION_INFO = {
 
 const RISK_COLORS = { low: 'green', medium: 'yellow', high: 'red' };
 
-export function ScannerTab({ opportunities, predictions }) {
+export function ScannerTab({ opportunities, predictions, exchange }) {
   const [markets, setMarkets] = useState([]);
   const [loading, setLoading] = useState(false);
   const [category, setCategory] = useState('');
@@ -74,6 +79,7 @@ export function ScannerTab({ opportunities, predictions }) {
         sortBy: params.sortBy || sortBy,
         search: params.search !== undefined ? params.search : search || undefined,
         limit: 100,
+        exchange: exchange || undefined,
       });
       setMarkets(data);
     } catch (err) {
@@ -81,12 +87,12 @@ export function ScannerTab({ opportunities, predictions }) {
     } finally {
       setLoading(false);
     }
-  }, [category, sortBy, search]);
+  }, [category, sortBy, search, exchange]);
 
-  // Initial load
+  // Fetch on mount and when exchange changes
   useEffect(() => {
     fetchMarkets();
-  }, []);
+  }, [exchange]);
 
   const handleCategoryChange = (val) => {
     setCategory(val);
@@ -178,7 +184,7 @@ export function ScannerTab({ opportunities, predictions }) {
       {/* Market List */}
       {!loading && markets.length === 0 && (
         <div className="empty-state">
-          <p className="text-muted">No markets found. Click "Refresh Data" in the header to fetch from Polymarket.</p>
+          <p className="text-muted">No markets found. Click "Refresh Data" in the header to fetch markets.</p>
         </div>
       )}
 
@@ -196,7 +202,20 @@ export function ScannerTab({ opportunities, predictions }) {
               onClick={() => handleExpandMarket(market.market_id)}
             >
               <div className="market-row-main">
-                <h4 className="market-row-question">{market.question}</h4>
+                <h4 className="market-row-question">
+                  {market.polymarket_url ? (
+                    <a
+                      href={market.polymarket_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="market-link"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {market.question}
+                      <span className="market-link-icon">&#x2197;</span>
+                    </a>
+                  ) : market.question}
+                </h4>
                 <div className="flex gap-sm mt-sm" style={{ flexWrap: 'wrap' }}>
                   <span className={`badge ${catColor}`}>{market.category}</span>
                   {market.days_until_resolution != null && (
@@ -300,10 +319,13 @@ export function ScannerTab({ opportunities, predictions }) {
                       const dirInfo = DIRECTION_INFO[pred.direction] || { label: pred.direction, color: 'gray' };
                       return (
                         <div key={i} className="market-edge-card">
-                          <div className="flex gap-sm mb-md">
+                          <div className="flex gap-sm mb-md" style={{ flexWrap: 'wrap' }}>
                             <span className={`badge ${dirInfo.color}`}>{dirInfo.label}</span>
                             <span className="badge gray">{pred.strength}</span>
                             <span className="badge purple">{pred.agent_name}</span>
+                            {(pred.data_sources || []).map((src, j) => (
+                              <span key={j} className="badge blue">{src}</span>
+                            ))}
                           </div>
                           <div className="metrics mb-md">
                             <div className="metric">
@@ -358,9 +380,9 @@ export function ScannerTab({ opportunities, predictions }) {
 
                 {/* Link */}
                 {market.polymarket_url && (
-                  <div className="market-detail-section">
-                    <a href={market.polymarket_url} target="_blank" rel="noopener noreferrer">
-                      View on Polymarket
+                  <div className="market-detail-section" style={{ textAlign: 'right' }}>
+                    <a href={market.polymarket_url} target="_blank" rel="noopener noreferrer" className="market-external-link">
+                      View on {market.market_id?.startsWith('kalshi:') ? 'Kalshi' : 'Polymarket'} &#x2197;
                     </a>
                   </div>
                 )}

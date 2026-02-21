@@ -32,6 +32,17 @@ class TradingConfig:
     min_liquidity: float = 5000.0      # skip illiquid markets ($ liquidity)
     allowed_risk_levels: list = field(default_factory=lambda: ["low", "medium", "high"])
 
+    # --- Execution controls ---
+    enabled_edge_types: list = field(default_factory=lambda: [
+        "arbitrage", "mispricing", "volume_signal", "liquidity_gap",
+        "sentiment", "correlation", "deadline_urgency",
+        "consensus_divergence", "category_momentum",
+    ])
+    price_aggressiveness: float = 0.99   # limit order offset (1.0 = at market, 0.98 = 2% below)
+    min_price: float = 0.05              # skip markets below this price
+    max_price: float = 0.95              # skip markets above this price
+    sizing_mode: str = "confidence"      # "confidence" = scale with conf, "fixed" = always max
+
     # --- Bot behavior ---
     dry_run: bool = True               # paper trade by default
     scan_interval: int = 120           # seconds between scans
@@ -69,3 +80,62 @@ class TradingConfig:
 
 
 trading_config = TradingConfig.from_env()
+
+
+@dataclass
+class KalshiConfig:
+    """Kalshi trading configuration — parallel to TradingConfig."""
+    api_key_id: str = ""
+    private_key_path: str = ""
+
+    # --- Risk limits (same field names as TradingConfig for RiskManager compat) ---
+    max_position_size: float = 50.0
+    max_daily_loss: float = 25.0
+    max_open_orders: int = 5
+    max_total_exposure: float = 200.0
+
+    # --- Strategy thresholds ---
+    min_confidence: float = 60.0
+    min_expected_return: float = 3.0
+    min_liquidity: float = 5000.0
+    allowed_risk_levels: list = field(default_factory=lambda: ["low", "medium", "high"])
+
+    # --- Execution controls ---
+    enabled_edge_types: list = field(default_factory=lambda: [
+        "arbitrage", "mispricing", "volume_signal", "liquidity_gap",
+        "sentiment", "correlation", "deadline_urgency",
+        "consensus_divergence", "category_momentum",
+    ])
+    price_aggressiveness: float = 0.99
+    min_price: float = 0.05
+    max_price: float = 0.95
+    sizing_mode: str = "confidence"
+
+    # --- Bot behavior ---
+    dry_run: bool = True
+    scan_interval: int = 120
+    log_level: str = "INFO"
+
+    @classmethod
+    def from_env(cls) -> "KalshiConfig":
+        return cls(
+            api_key_id=os.getenv("KALSHI_API_KEY_ID", ""),
+            private_key_path=os.getenv("KALSHI_PRIVATE_KEY_PATH", ""),
+            max_position_size=float(os.getenv("KALSHI_MAX_POSITION", "50")),
+            max_daily_loss=float(os.getenv("KALSHI_MAX_DAILY_LOSS", "25")),
+            max_open_orders=int(os.getenv("KALSHI_MAX_OPEN_ORDERS", "5")),
+            max_total_exposure=float(os.getenv("KALSHI_MAX_EXPOSURE", "200")),
+            min_confidence=float(os.getenv("KALSHI_MIN_CONFIDENCE", "60")),
+            min_expected_return=float(os.getenv("KALSHI_MIN_RETURN", "3")),
+            min_liquidity=float(os.getenv("KALSHI_MIN_LIQUIDITY", "5000")),
+            dry_run=os.getenv("KALSHI_DRY_RUN", "true").lower() != "false",
+            scan_interval=int(os.getenv("KALSHI_SCAN_INTERVAL", "120")),
+            log_level=os.getenv("KALSHI_LOG_LEVEL", "INFO"),
+        )
+
+    @property
+    def has_credentials(self) -> bool:
+        return bool(self.api_key_id and self.private_key_path)
+
+
+kalshi_config = KalshiConfig.from_env()
