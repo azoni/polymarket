@@ -23,6 +23,16 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# CONFIDENCE TIERS — calibrated caps based on data quality
+# =============================================================================
+
+CONFIDENCE_CAP_LLM_WITH_DATA = 80      # LLM + real external data
+CONFIDENCE_CAP_LLM_NO_DATA = 60        # LLM but no external data
+CONFIDENCE_CAP_HEURISTIC_WITH_DATA = 45 # No LLM, but has external data
+CONFIDENCE_CAP_HEURISTIC_NO_DATA = 35   # No LLM, no external data
+
+
+# =============================================================================
 # BASE AGENT
 # =============================================================================
 
@@ -62,14 +72,24 @@ class ResearchAgent(ABC):
         except Exception as e:
             logger.debug(f"Kalshi lookup failed: {e}")
 
+    def _has_real_data(self, external_data: Dict) -> bool:
+        """Check if we have meaningful external data (not just kalshi cross-ref)."""
+        for key, value in external_data.items():
+            if key != "kalshi" and value:
+                return True
+        return False
+
     def analyze(self, market: Market) -> Prediction:
-        """Full analysis: gather data → Kalshi cross-ref → LLM → fallback to heuristic."""
+        """Full analysis: gather data → Kalshi cross-ref → LLM (primary) → fallback to heuristic."""
         external_data, sources = self.gather_data(market)
 
         # Cross-reference with Kalshi
         self._fetch_kalshi_data(market, external_data, sources)
 
-        # Try LLM analysis first
+        has_data = self._has_real_data(external_data)
+        used_llm = False
+
+        # LLM is the PRIMARY analysis path when available
         if llm_client.is_available():
             llm_result = llm_client.analyze_market(
                 question=market.question,
@@ -79,28 +99,49 @@ class ResearchAgent(ABC):
             )
             if llm_result:
                 sources.append("Claude")
-                return self._llm_to_prediction(market, llm_result, sources)
+                prediction = self._llm_to_prediction(market, llm_result, sources)
+                used_llm = True
 
-        # Fallback to heuristic
+                # Apply confidence cap based on data quality
+                cap = CONFIDENCE_CAP_LLM_WITH_DATA if has_data else CONFIDENCE_CAP_LLM_NO_DATA
+                prediction.confidence = min(prediction.confidence, cap)
+
+                # Apply Kalshi divergence adjustment (if present)
+                self._apply_kalshi_adjustment(prediction, external_data, market)
+                return prediction
+
+        # Fallback to heuristic — mark honestly
         prediction = self.heuristic_analyze(market, external_data, sources)
 
-        # If Kalshi data exists, adjust prediction based on cross-platform divergence
-        kalshi = external_data.get("kalshi")
-        if kalshi and kalshi.get("yes_price"):
-            kalshi_price = kalshi["yes_price"]
-            poly_price = market.current_price
-            divergence = abs(kalshi_price - poly_price)
-            if divergence > 0.05:
-                # Significant cross-platform price difference
-                avg_price = (kalshi_price + poly_price) / 2
-                prediction.reasoning += (
-                    f" Kalshi prices this at {kalshi_price:.0%} vs Polymarket {poly_price:.0%} "
-                    f"({divergence:.0%} divergence)."
-                )
-                # Increase confidence when platforms agree, flag divergence when they don't
-                prediction.confidence = min(85, prediction.confidence + divergence * 100)
+        # Apply heuristic confidence caps
+        cap = CONFIDENCE_CAP_HEURISTIC_WITH_DATA if has_data else CONFIDENCE_CAP_HEURISTIC_NO_DATA
+        prediction.confidence = min(prediction.confidence, cap)
+
+        # Apply Kalshi divergence adjustment
+        self._apply_kalshi_adjustment(prediction, external_data, market)
 
         return prediction
+
+    def _apply_kalshi_adjustment(self, prediction: Prediction, external_data: Dict, market: Market):
+        """Adjust prediction based on Kalshi cross-platform divergence."""
+        kalshi = external_data.get("kalshi")
+        if not kalshi or not kalshi.get("yes_price"):
+            return
+
+        kalshi_price = kalshi["yes_price"]
+        poly_price = market.current_price
+        divergence = abs(kalshi_price - poly_price)
+
+        if divergence > 0.05:
+            prediction.reasoning += (
+                f" Kalshi prices this at {kalshi_price:.0%} vs Polymarket {poly_price:.0%} "
+                f"({divergence:.0%} divergence)."
+            )
+            # Small confidence bump when cross-platform data exists (max +10)
+            prediction.confidence = min(
+                prediction.confidence + min(10, int(divergence * 50)),
+                CONFIDENCE_CAP_LLM_WITH_DATA  # never exceed max cap
+            )
 
     def _llm_to_prediction(self, market: Market, llm: Dict, sources: List[str]) -> Prediction:
         """Convert LLM result dict to a Prediction model."""
@@ -129,7 +170,9 @@ class ResearchAgent(ABC):
         if not self.can_analyze(market):
             return None
         prediction = self.analyze(market)
-        prediction.agent_name = self.name
+        # Mark agent name — append (heuristic) if LLM was not used
+        used_llm = "Claude" in (prediction.data_sources or [])
+        prediction.agent_name = self.name if used_llm else f"{self.name} (heuristic)"
         prediction.polymarket_url = getattr(market, "polymarket_url", "")
         return prediction
 
@@ -139,7 +182,7 @@ class ResearchAgent(ABC):
 # =============================================================================
 
 class PoliticsAgent(ResearchAgent):
-    """Political markets. Data: NewsAPI or Wikipedia."""
+    """Political markets. Data: NewsAPI."""
 
     KEYWORDS = ["election", "president", "senate", "congress", "trump", "biden",
                 "republican", "democrat", "governor", "vote", "primary", "nominee"]
@@ -167,30 +210,23 @@ class PoliticsAgent(ResearchAgent):
         reasoning_parts = []
 
         sentiment_data = external_data.get("news_sentiment")
-        if sentiment_data:
+        if sentiment_data and sentiment_data.get("source") == "NewsAPI":
             sentiment = sentiment_data.get("sentiment", 0.0)
             article_count = sentiment_data.get("articles", 0)
             adjustment = sentiment * 0.08
             predicted = max(0.02, min(0.98, current + adjustment))
-            confidence = min(70, 45 + article_count * 2 + abs(sentiment) * 15)
+            # Confidence based on data quality tier, not made-up formulas
+            confidence = CONFIDENCE_CAP_HEURISTIC_WITH_DATA
 
-            source = sentiment_data.get("source", "")
-            if source == "NewsAPI":
-                headlines = sentiment_data.get("headlines", [])
-                reasoning_parts.append(
-                    f"Based on {article_count} recent news articles (sentiment: {sentiment:+.2f}). "
-                    f"Top headline: \"{headlines[0][:80]}\"" if headlines else
-                    f"Based on {article_count} recent news articles (sentiment: {sentiment:+.2f})."
-                )
-            else:
-                context = sentiment_data.get("context", [])
-                reasoning_parts.append(
-                    f"Wikipedia context analyzed. {context[0][:100]}..." if context else
-                    "Limited context available from Wikipedia."
-                )
+            headlines = sentiment_data.get("headlines", [])
+            reasoning_parts.append(
+                f"Based on {article_count} recent news articles (sentiment: {sentiment:+.2f}). "
+                + (f"Top headline: \"{headlines[0][:80]}\"" if headlines else "")
+            )
         else:
+            # No real data — be honest about it
             predicted = current + (0.03 * (0.5 - current))
-            confidence = 35
+            confidence = CONFIDENCE_CAP_HEURISTIC_NO_DATA
             reasoning_parts.append("No external data available. Using mean-reversion heuristic.")
 
         edge = predicted - current
@@ -272,12 +308,12 @@ class SportsAgent(ResearchAgent):
                             f"Vegas odds imply {max_team} at {vegas_prob:.0%}. "
                             f"Polymarket at {current:.0%}."
                         )
-                        confidence = min(75, 55 + abs(predicted - current) * 100)
+                        confidence = CONFIDENCE_CAP_HEURISTIC_WITH_DATA
                     else:
-                        predicted, confidence = current, 40
+                        predicted, confidence = current, 30
                         reasoning_parts.append("Odds data found but could not extract implied probabilities.")
                 else:
-                    predicted, confidence = current, 40
+                    predicted, confidence = current, 30
                     reasoning_parts.append(f"Found {len(events)} events but no close match.")
             elif events and source == "ESPN":
                 event = events[0]
@@ -285,13 +321,14 @@ class SportsAgent(ResearchAgent):
                     f"ESPN: {event['home']} ({event.get('home_record', '')}) vs {event['away']} ({event.get('away_record', '')}). "
                 )
                 predicted = current + (0.02 * (0.5 - current))
-                confidence = 45
+                confidence = 35
             else:
-                predicted, confidence = current, 40
-                reasoning_parts.append(f"No upcoming events found.")
+                predicted, confidence = current, 30
+                reasoning_parts.append("No upcoming events found.")
         else:
-            predicted, confidence = current, 35
-            reasoning_parts.append("Could not identify sport or fetch data.")
+            # No data at all — be honest
+            predicted, confidence = current, 25
+            reasoning_parts.append("Could not identify sport or fetch odds data. No prediction possible.")
 
         edge = predicted - current
         if abs(edge) < 0.02:
@@ -400,26 +437,20 @@ class CryptoAgent(ResearchAgent):
                 distance_pct = (target - current_crypto_price) / current_crypto_price * 100
 
                 if is_dip:
-                    # Question asks about price DROPPING to target
                     if distance_pct >= 0:
-                        # Already below target — dip already happened
                         predicted = max(0.7, min(0.95, 0.85))
                         reasoning_parts.append(f"Already below target ${target:,.0f}. Dip has occurred.")
                     elif abs(distance_pct) < 15:
-                        # Close to dipping — moderate probability
                         momentum_factor = max(-0.1, min(0.1, change_7d / 100))
                         predicted = max(0.2, min(0.6, 0.4 + momentum_factor))
                         reasoning_parts.append(f"Only {abs(distance_pct):.0f}% above dip target ${target:,.0f}.")
                     elif abs(distance_pct) < 40:
-                        # Would need a significant drop
                         predicted = max(0.05, min(0.25, 0.15 - change_30d / 500))
                         reasoning_parts.append(f"Needs {abs(distance_pct):.0f}% drop to reach ${target:,.0f}. Unlikely in short term.")
                     else:
-                        # Massive drop required
                         predicted = max(0.02, min(0.1, 0.05))
                         reasoning_parts.append(f"Would need {abs(distance_pct):.0f}% crash to ${target:,.0f}. Extremely unlikely.")
                 else:
-                    # Question asks about price REACHING/RISING to target
                     if distance_pct <= 0:
                         predicted = max(0.7, min(0.95, current + 0.1))
                         reasoning_parts.append(f"Already above target ${target:,.0f}.")
@@ -432,15 +463,17 @@ class CryptoAgent(ResearchAgent):
                     else:
                         predicted = max(0.05, min(0.3, 0.15 + change_30d / 300))
                         reasoning_parts.append(f"Significant distance ({distance_pct:.0f}%) to target ${target:,.0f}.")
-                confidence = min(70, 50 + abs(predicted - current) * 50)
+                # Has price target + price data = decent heuristic
+                confidence = CONFIDENCE_CAP_HEURISTIC_WITH_DATA
             else:
+                # Momentum-only prediction — cap lower
                 momentum = (change_7d + change_30d / 2) / 100
                 predicted = max(0.05, min(0.95, current + momentum * 0.15))
-                confidence = min(60, 40 + abs(change_7d) * 0.5)
-                reasoning_parts.append("Using momentum-based prediction.")
+                confidence = min(40, 30 + abs(change_7d) * 0.3)
+                reasoning_parts.append("Using momentum-based prediction (no price target found).")
         else:
-            predicted, confidence = current, 30
-            reasoning_parts.append("Could not identify crypto asset.")
+            predicted, confidence = current, 25
+            reasoning_parts.append("Could not identify crypto asset or fetch price data.")
 
         if fng:
             fng_value = fng.get("value", 50)
@@ -536,11 +569,11 @@ class EconomicsAgent(ResearchAgent):
             else:
                 momentum = 0.04 if trend == "rising" else -0.04 if trend == "falling" else 0
                 predicted = max(0.05, min(0.95, current + momentum))
-            confidence = min(72, 55 + abs(change) * 10)
+            confidence = CONFIDENCE_CAP_HEURISTIC_WITH_DATA
         else:
-            predicted, confidence = current, 45
+            predicted, confidence = current, 30
             if indicator:
-                reasoning_parts.append(f"No FRED data available for {indicator}.")
+                reasoning_parts.append(f"No FRED data available for {indicator}. Set FRED_API_KEY for better analysis.")
 
         if treasury:
             rates = treasury.get("rates", {})
@@ -549,7 +582,7 @@ class EconomicsAgent(ResearchAgent):
                 reasoning_parts.append(f"Treasury rates: {rate_info}.")
 
         if not sources:
-            predicted, confidence = current, 40
+            predicted, confidence = current, CONFIDENCE_CAP_HEURISTIC_NO_DATA
             reasoning_parts.append("No external economic data available.")
 
         predicted = max(0.02, min(0.98, predicted))
@@ -579,7 +612,7 @@ class EconomicsAgent(ResearchAgent):
 # =============================================================================
 
 class GeneralAgent(ResearchAgent):
-    """Fallback agent. Data: Wikipedia context."""
+    """Fallback agent. Relies on LLM when available, otherwise minimal heuristic."""
 
     def __init__(self):
         super().__init__("GeneralAgent", [MarketCategory.OTHER])
@@ -588,27 +621,15 @@ class GeneralAgent(ResearchAgent):
         return True
 
     def gather_data(self, market: Market) -> tuple:
-        sources = []
-        data = {}
-        context = politics_source._wikipedia_context(market.question)
-        if context and context.get("context"):
-            sources.append("Wikipedia")
-            data["wikipedia"] = context
-        return data, sources
+        # No reliable external data source for general markets
+        return {}, []
 
     def heuristic_analyze(self, market: Market, external_data: Dict, sources: List[str]) -> Prediction:
         current = market.current_price
-        reasoning_parts = []
-        wiki = external_data.get("wikipedia")
 
-        if wiki:
-            snippets = wiki.get("context", [])
-            reasoning_parts.append(f"Wikipedia context: {snippets[0][:120]}..." if snippets else "")
-            predicted = current + (0.02 * (0.5 - current))
-            confidence = 35
-        else:
-            predicted, confidence = current, 25
-            reasoning_parts.append("No matching context. Requires manual research.")
+        # Honest: we have no data, just apply minimal mean-reversion
+        predicted = current + (0.02 * (0.5 - current))
+        confidence = 25
 
         edge = predicted - current
         if abs(edge) < 0.02:
@@ -624,7 +645,7 @@ class GeneralAgent(ResearchAgent):
             edge=round(edge, 4), confidence=round(confidence),
             confidence_low=max(0, predicted - 0.25), confidence_high=min(1, predicted + 0.25),
             direction=direction, strength=strength,
-            reasoning=" ".join(reasoning_parts),
+            reasoning="No specialized data source for this market. Requires manual research or LLM analysis.",
             key_risks=["Unknown factors"], catalysts=["Varies"],
             data_sources=sources,
         )

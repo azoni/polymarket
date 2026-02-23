@@ -20,6 +20,7 @@ class PaperAccount:
     def __init__(self, starting_balance: float = PAPER_STARTING_BALANCE):
         self.starting_balance = starting_balance
         self.balance = starting_balance
+        self.realized_pnl = 0.0  # track actual realized gains/losses
 
     def deduct(self, amount: float):
         self.balance -= amount
@@ -53,14 +54,57 @@ class TradeRecord:
 class RiskManager:
     """Enforces position limits, daily loss limits, and exposure caps."""
 
-    def __init__(self, config: TradingConfig = None):
+    def __init__(self, config: TradingConfig = None, db=None, exchange: str = "polymarket"):
         self.config = config or trading_config
+        self.db = db
+        self.exchange = exchange
         self.trades_today: list[TradeRecord] = []
-        self.open_positions: dict[str, float] = {}  # token_id -> $ exposure
+        self.open_positions: dict[str, dict] = {}
         self._current_date: date = date.today()
         self.paper_account = PaperAccount()
-        # Track total value (cash + positions) at day start, not just cash
-        self._day_start_balance: float = self.paper_account.balance
+        self._daily_realized_pnl: float = 0.0  # actual realized P&L today
+
+        # Load persisted state from DB if available
+        self._load_from_db()
+
+        # Track total value (cash + positions) at day start
+        self._day_start_balance: float = self.paper_account.balance + self.total_exposure
+
+    def _load_from_db(self):
+        """Restore positions and paper account from database."""
+        if not self.db:
+            return
+        try:
+            # Load positions
+            saved_positions = self.db.load_positions(self.exchange)
+            if saved_positions:
+                self.open_positions = saved_positions
+                logger.info(f"Restored {len(saved_positions)} positions from DB for {self.exchange}")
+
+            # Load paper account
+            saved_account = self.db.load_paper_account(self.exchange)
+            if saved_account:
+                self.paper_account.balance = saved_account["balance"]
+                self.paper_account.starting_balance = saved_account["starting_balance"]
+                self.paper_account.realized_pnl = saved_account.get("realized_pnl", 0.0)
+                logger.info(f"Restored paper account from DB: ${self.paper_account.balance:.2f}")
+        except Exception as e:
+            logger.warning(f"Failed to load saved state from DB: {e}")
+
+    def _persist_to_db(self):
+        """Save current positions and paper account to database."""
+        if not self.db:
+            return
+        try:
+            self.db.save_positions(self.open_positions, self.exchange)
+            self.db.save_paper_account(
+                self.exchange,
+                self.paper_account.balance,
+                self.paper_account.starting_balance,
+                self.paper_account.realized_pnl,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to persist state to DB: {e}")
 
     def _reset_daily(self):
         """Reset daily counters if the date has changed."""
@@ -68,12 +112,13 @@ class RiskManager:
         if today != self._current_date:
             logger.info(f"New trading day: {today}. Resetting daily counters.")
             self.trades_today.clear()
+            self._daily_realized_pnl = 0.0
             self._day_start_balance = self.paper_account.balance + self.total_exposure
             self._current_date = today
 
     @property
     def daily_pnl(self) -> float:
-        """Today's P&L based on total account value (cash + positions)."""
+        """Today's P&L: realized trades + unrealized position change."""
         self._reset_daily()
         current_value = self.paper_account.balance + self.total_exposure
         return current_value - self._day_start_balance
@@ -121,7 +166,8 @@ class RiskManager:
         return True, "OK"
 
     def record_trade(self, token_id: str, side: str, price: float, size: float,
-                     market: str = "", edge_type: str = "", reasoning: str = ""):
+                     market: str = "", edge_type: str = "", reasoning: str = "",
+                     market_id: str = ""):
         """Record a trade that was executed."""
         self._reset_daily()
         cost = price * size
@@ -144,6 +190,7 @@ class RiskManager:
                     "side": side,
                     "entry_price": price,
                     "market": market,
+                    "market_id": market_id,
                     "edge_type": edge_type,
                     "reasoning": reasoning,
                     "opened_at": datetime.now().isoformat(),
@@ -161,6 +208,9 @@ class RiskManager:
 
         logger.info(f"Recorded {side} {size:.1f} @ ${price:.3f} = ${cost:.2f}. "
                      f"Exposure: ${self.total_exposure:.2f}, Open: {self.open_order_count}")
+
+        # Persist to DB after every trade
+        self._persist_to_db()
 
     @property
     def total_pnl(self) -> float:

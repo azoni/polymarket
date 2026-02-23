@@ -3,18 +3,7 @@
  * Displays a detected edge opportunity.
  */
 
-const EDGE_TYPE_LABELS = {
-  arbitrage: { label: 'Arbitrage', color: 'green' },
-  mispricing: { label: 'Mispricing', color: 'yellow' },
-  volume_signal: { label: 'Volume Signal', color: 'purple' },
-  liquidity_gap: { label: 'Liquidity Gap', color: 'blue' },
-};
-
-const RISK_COLORS = {
-  low: 'green',
-  medium: 'yellow',
-  high: 'red',
-};
+import { EDGE_TYPE_LABELS, RISK_COLORS } from '../constants';
 
 export function OpportunityCard({ opportunity }) {
   const typeInfo = EDGE_TYPE_LABELS[opportunity.edge_type] || { label: opportunity.edge_type, color: 'gray' };

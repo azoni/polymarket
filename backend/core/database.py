@@ -154,6 +154,27 @@ class Database:
                 created_at TEXT DEFAULT (datetime('now'))
             );
 
+            CREATE TABLE IF NOT EXISTS positions (
+                token_id TEXT PRIMARY KEY,
+                exchange TEXT DEFAULT 'polymarket',
+                exposure REAL NOT NULL,
+                side TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                market_id TEXT DEFAULT '',
+                market TEXT DEFAULT '',
+                edge_type TEXT DEFAULT '',
+                reasoning TEXT DEFAULT '',
+                opened_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS paper_account (
+                exchange TEXT PRIMARY KEY,
+                balance REAL NOT NULL,
+                starting_balance REAL NOT NULL,
+                realized_pnl REAL DEFAULT 0.0,
+                updated_at TEXT DEFAULT (datetime('now'))
+            );
+
             CREATE TABLE IF NOT EXISTS schema_version (
                 version INTEGER PRIMARY KEY,
                 applied_at TEXT DEFAULT (datetime('now'))
@@ -613,6 +634,78 @@ class Database:
             GROUP BY agent_name
         """).fetchall()
         return [dict(r) for r in rows]
+
+    # ─── Positions ─────────────────────────────────────────────────────
+
+    def save_positions(self, positions: dict, exchange: str = "polymarket"):
+        """Persist all open positions (replaces existing for this exchange)."""
+        conn = self._conn
+        conn.execute("DELETE FROM positions WHERE exchange = ?", (exchange,))
+        for token_id, pos in positions.items():
+            if isinstance(pos, dict):
+                conn.execute("""
+                    INSERT INTO positions (token_id, exchange, exposure, side, entry_price,
+                        market_id, market, edge_type, reasoning, opened_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    token_id, exchange,
+                    pos.get("exposure", 0),
+                    pos.get("side", "BUY"),
+                    pos.get("entry_price", 0),
+                    pos.get("market_id", ""),
+                    pos.get("market", ""),
+                    pos.get("edge_type", ""),
+                    pos.get("reasoning", ""),
+                    pos.get("opened_at", datetime.now().isoformat()),
+                ))
+        conn.commit()
+
+    def load_positions(self, exchange: str = "polymarket") -> dict:
+        """Load open positions for an exchange."""
+        rows = self._conn.execute(
+            "SELECT * FROM positions WHERE exchange = ?", (exchange,)
+        ).fetchall()
+        positions = {}
+        for r in rows:
+            positions[r["token_id"]] = {
+                "exposure": r["exposure"],
+                "side": r["side"],
+                "entry_price": r["entry_price"],
+                "market_id": r["market_id"],
+                "market": r["market"],
+                "edge_type": r["edge_type"],
+                "reasoning": r["reasoning"],
+                "opened_at": r["opened_at"],
+            }
+        return positions
+
+    def save_paper_account(self, exchange: str, balance: float,
+                           starting_balance: float, realized_pnl: float):
+        """Persist paper account state."""
+        conn = self._conn
+        conn.execute("""
+            INSERT INTO paper_account (exchange, balance, starting_balance, realized_pnl, updated_at)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(exchange) DO UPDATE SET
+                balance=excluded.balance,
+                starting_balance=excluded.starting_balance,
+                realized_pnl=excluded.realized_pnl,
+                updated_at=excluded.updated_at
+        """, (exchange, balance, starting_balance, realized_pnl, datetime.now().isoformat()))
+        conn.commit()
+
+    def load_paper_account(self, exchange: str = "polymarket") -> dict | None:
+        """Load paper account state. Returns None if not saved yet."""
+        row = self._conn.execute(
+            "SELECT * FROM paper_account WHERE exchange = ?", (exchange,)
+        ).fetchone()
+        if row:
+            return {
+                "balance": row["balance"],
+                "starting_balance": row["starting_balance"],
+                "realized_pnl": row["realized_pnl"],
+            }
+        return None
 
     # ─── Dashboard Stats ────────────────────────────────────────────────
 

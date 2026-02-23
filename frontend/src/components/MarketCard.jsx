@@ -4,16 +4,7 @@
  */
 
 import { ScoreBar } from './ScoreBar';
-
-const CATEGORY_COLORS = {
-  politics: 'blue',
-  sports: 'green',
-  crypto: 'yellow',
-  economics: 'purple',
-  entertainment: 'purple',
-  science: 'blue',
-  other: 'gray',
-};
+import { CATEGORY_COLORS } from '../constants';
 
 export function MarketCard({ market }) {
   const categoryColor = CATEGORY_COLORS[market.category] || 'gray';

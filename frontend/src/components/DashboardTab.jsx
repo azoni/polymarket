@@ -3,37 +3,12 @@
  */
 
 import { useState } from 'react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-
-const EDGE_TYPE_LABELS = {
-  arbitrage: { label: 'Arbitrage', color: 'green' },
-  mispricing: { label: 'Mispricing', color: 'yellow' },
-  volume_signal: { label: 'Vol Signal', color: 'purple' },
-  liquidity_gap: { label: 'Liq Gap', color: 'blue' },
-  sentiment: { label: 'Sentiment', color: 'blue' },
-  correlation: { label: 'Correlation', color: 'purple' },
-  deadline_urgency: { label: 'Deadline', color: 'red' },
-  consensus_divergence: { label: 'Consensus', color: 'yellow' },
-  category_momentum: { label: 'Momentum', color: 'green' },
-};
-
-const EDGE_COLORS = {
-  arbitrage: 'green',
-  mispricing: 'yellow',
-  volume_signal: 'purple',
-  liquidity_gap: 'blue',
-  sentiment: 'blue',
-  correlation: 'purple',
-  deadline_urgency: 'red',
-  consensus_divergence: 'yellow',
-  category_momentum: 'green',
-};
-
-const RISK_COLORS = {
-  low: 'green',
-  medium: 'yellow',
-  high: 'red',
-};
+import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import { EDGE_TYPE_LABELS, EDGE_COLORS, RISK_COLORS } from '../constants';
+import { TabIntroBanner } from './TabIntroBanner';
+import { HelpIcon } from './Tooltip';
+import { TAB_INTROS, METRIC_HELP } from '../tooltips';
+import { useAnimatedNumber } from '../hooks';
 
 export function DashboardTab({
   status, signals, scanning, onScan, config, onReset,
@@ -51,6 +26,9 @@ export function DashboardTab({
   const pnlPct = balance.starting_balance > 0 ? (pnl / balance.starting_balance * 100) : 0;
 
   const [expandedSignal, setExpandedSignal] = useState(null);
+
+  const animatedTotal = useAnimatedNumber(totalValue);
+  const animatedPnl = useAnimatedNumber(pnl);
 
   const chartData = history.map(h => ({
     time: new Date(h.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -87,7 +65,9 @@ export function DashboardTab({
   const signalList = signals || [];
 
   return (
-    <div className="dashboard-layout">
+    <div>
+      <TabIntroBanner tabName="dashboard" text={TAB_INTROS.dashboard} />
+      <div className="dashboard-layout">
       {/* ── Left: Main Dashboard ── */}
       <div className="dashboard-main">
         {/* Scan Controls */}
@@ -144,11 +124,11 @@ export function DashboardTab({
                   </span>
                 </div>
                 <div className="portfolio-value">
-                  ${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${animatedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
                 <div className="portfolio-pnl-row">
                   <span className={`portfolio-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
-                    {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)} ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)
+                    {animatedPnl >= 0 ? '+' : ''}{animatedPnl.toFixed(2)} ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)
                   </span>
                   <span className="portfolio-pnl-label">all time</span>
                   {(risk.daily_pnl != null && risk.daily_pnl !== 0) && (
@@ -229,7 +209,7 @@ export function DashboardTab({
                       fontFamily="Inter, system-ui, sans-serif"
                       width={60}
                     />
-                    <Tooltip
+                    <RechartsTooltip
                       contentStyle={{ background: '#161618', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 8, fontFamily: 'Inter, system-ui, sans-serif', fontSize: 12, color: '#ececef', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}
                       labelStyle={{ color: '#8b8b8e' }}
                       formatter={(value) => [`$${value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 'Balance']}
@@ -262,7 +242,7 @@ export function DashboardTab({
             <div className="card-header"><h3>Risk</h3></div>
             <div className="card-body">
               <div className="risk-row">
-                <span className="risk-label">Daily P&L</span>
+                <span className="risk-label">Daily P&L <HelpIcon tooltip={METRIC_HELP.daily_pnl} position="right" /></span>
                 <span className={risk.daily_pnl >= 0 ? 'text-green' : 'text-red'}>
                   ${(risk.daily_pnl || 0).toFixed(2)}
                 </span>
@@ -271,7 +251,7 @@ export function DashboardTab({
                 </span>
               </div>
               <div className="risk-row">
-                <span className="risk-label">Exposure</span>
+                <span className="risk-label">Exposure <HelpIcon tooltip={METRIC_HELP.exposure} position="right" /></span>
                 <div className="progress-bar-container">
                   <div
                     className="progress-bar"
@@ -496,6 +476,7 @@ export function DashboardTab({
           )}
         </div>
       </div>
+    </div>
     </div>
   );
 }

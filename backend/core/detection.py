@@ -275,32 +275,30 @@ def detect_liquidity_gaps(markets: List[Market], min_spread: float = 3.0) -> Lis
 
 
 # =============================================================================
-# NEW DETECTION STRATEGIES
+# TIGHTENED DETECTION STRATEGIES
 # =============================================================================
 
 def detect_deadline_urgency(markets: List[Market]) -> List[EdgeOpportunity]:
     """
     Markets approaching resolution with uncertain pricing.
-    As deadline nears, prices should converge to 0 or 1.
-    Markets still at intermediate prices near deadline = high opportunity.
+    Only flags markets within 48 hours where price is genuinely uncertain.
     """
     opportunities = []
 
     for market in markets:
         days = market.days_until_resolution
-        if days is None or days > 7 or days < 0:
-            continue
+        if days is None or days > 2 or days < 0:
+            continue  # Only flag within 48 hours
 
         price = market.current_price
-        # Price uncertainty: how far from 0 or 1
-        uncertainty = min(price, 1 - price)  # 0 = certain, 0.5 = max uncertain
+        # Must be genuinely uncertain (not near-resolved)
+        if price < 0.15 or price > 0.85:
+            continue
 
-        if uncertainty < 0.15:
-            continue  # Already converging, skip
+        uncertainty = min(price, 1 - price)
 
-        # Closer deadline + more uncertainty = stronger signal
-        urgency_score = (1 - days / 7) * uncertainty * 2
-        confidence = min(75, 40 + urgency_score * 80)
+        urgency_score = (1 - days / 2) * uncertainty * 2
+        confidence = min(55, 35 + urgency_score * 50)
         expected_return = round(uncertainty * 20, 1)
 
         opportunities.append(EdgeOpportunity(
@@ -323,13 +321,15 @@ def detect_deadline_urgency(markets: List[Market]) -> List[EdgeOpportunity]:
 def detect_correlation_edge(markets: List[Market]) -> List[EdgeOpportunity]:
     """
     Find correlated markets where one has moved but the other hasn't.
-    Groups markets by keyword overlap and flags stale outliers.
+    Requires strong keyword overlap (70%+) and at least 3 shared keywords.
     """
     opportunities = []
 
-    # Extract keywords for each market
+    # Stop words to exclude from keyword matching
     stop_words = {"will", "the", "be", "by", "in", "to", "a", "an", "of", "is",
-                  "at", "on", "for", "and", "or", "?", "before", "after"}
+                  "at", "on", "for", "and", "or", "?", "before", "after", "does",
+                  "have", "has", "been", "would", "could", "should", "was", "were",
+                  "not", "more", "than", "this", "that", "with", "from"}
 
     market_keywords = {}
     for m in markets:
@@ -337,10 +337,9 @@ def detect_correlation_edge(markets: List[Market]) -> List[EdgeOpportunity]:
         words = {w for w in words if len(w) > 2}
         market_keywords[m.market_id] = words
 
-    # Find pairs with significant keyword overlap
     market_list = list(markets)
     for i in range(len(market_list)):
-        for j in range(i + 1, min(i + 50, len(market_list))):  # limit comparisons
+        for j in range(i + 1, min(i + 50, len(market_list))):
             m1, m2 = market_list[i], market_list[j]
             kw1 = market_keywords.get(m1.market_id, set())
             kw2 = market_keywords.get(m2.market_id, set())
@@ -349,17 +348,18 @@ def detect_correlation_edge(markets: List[Market]) -> List[EdgeOpportunity]:
                 continue
 
             overlap = kw1 & kw2
-            overlap_ratio = len(overlap) / min(len(kw1), len(kw2))
 
-            if overlap_ratio < 0.4 or len(overlap) < 2:
+            # Require strong overlap: 70%+ AND at least 3 shared keywords
+            if len(overlap) < 3:
+                continue
+            overlap_ratio = len(overlap) / min(len(kw1), len(kw2))
+            if overlap_ratio < 0.7:
                 continue
 
-            # Check if one has moved significantly but the other hasn't
             price_diff = abs(m1.current_price - m2.current_price)
             if price_diff < 0.15:
                 continue
 
-            # The market closer to 0.5 is the "stale" one
             m1_dev = abs(m1.current_price - 0.5)
             m2_dev = abs(m2.current_price - 0.5)
 
@@ -368,7 +368,7 @@ def detect_correlation_edge(markets: List[Market]) -> List[EdgeOpportunity]:
             else:
                 moved, stale = m2, m1
 
-            confidence = min(65, 35 + price_diff * 100)
+            confidence = min(60, 30 + price_diff * 80)
             expected_return = round(price_diff * 50, 1)
 
             opportunities.append(EdgeOpportunity(
@@ -395,7 +395,7 @@ def detect_consensus_divergence(
 ) -> List[EdgeOpportunity]:
     """
     When research agent predictions diverge significantly from market price.
-    Connects the research system to the edge detection system.
+    Only trusts predictions from LLM-backed agents (not heuristic fallbacks).
     """
     opportunities = []
 
@@ -406,11 +406,15 @@ def detect_consensus_divergence(
         if not pred:
             continue
 
-        # Need meaningful divergence and decent confidence
-        if abs(pred.edge) < 0.08 or pred.confidence < 50:
+        # Skip heuristic-only predictions (low confidence = likely guessing)
+        if pred.confidence <= 35:
             continue
 
-        confidence = min(75, pred.confidence * 0.8 + abs(pred.edge) * 50)
+        # Require meaningful divergence and decent confidence
+        if abs(pred.edge) < 0.12 or pred.confidence < 60:
+            continue
+
+        confidence = min(70, pred.confidence * 0.7 + abs(pred.edge) * 40)
         expected_return = round(abs(pred.edge) * 100, 1)
 
         if pred.edge > 0:
@@ -441,33 +445,27 @@ def detect_consensus_divergence(
 def detect_category_momentum(markets: List[Market]) -> List[EdgeOpportunity]:
     """
     Track if a category is trending in one direction.
-    Flag outlier markets that haven't moved with the category.
+    Requires at least 5 markets in a category for meaningful signal.
     """
     opportunities = []
 
-    # Group by category and compute stats
     by_category: Dict[str, List[Market]] = defaultdict(list)
     for m in markets:
         by_category[m.category.value].append(m)
 
     for cat, cat_markets in by_category.items():
-        if len(cat_markets) < 3:
+        if len(cat_markets) < 5:  # Need at least 5 for meaningful average
             continue
 
-        # Calculate average directional bias for the category
         prices = [m.current_price for m in cat_markets]
         avg_price = sum(prices) / len(prices)
-        avg_deviation = sum(abs(p - 0.5) for p in prices) / len(prices)
 
-        # Category has a directional lean if average is far from 0.5
         cat_bias = avg_price - 0.5
         if abs(cat_bias) < 0.05:
-            continue  # No clear category direction
+            continue
 
-        # Find outliers that deviate from category direction
         for market in cat_markets:
             market_bias = market.current_price - 0.5
-            # Outlier: market leans opposite to category
             if cat_bias > 0 and market_bias < -0.05:
                 divergence = cat_bias - market_bias
             elif cat_bias < 0 and market_bias > 0.05:
@@ -475,10 +473,11 @@ def detect_category_momentum(markets: List[Market]) -> List[EdgeOpportunity]:
             else:
                 continue
 
-            if divergence < 0.15:
+            # Require larger divergence (was 0.15, now 0.25)
+            if divergence < 0.25:
                 continue
 
-            confidence = min(60, 30 + divergence * 80)
+            confidence = min(50, 25 + divergence * 60)
             expected_return = round(divergence * 30, 1)
 
             direction = "YES" if cat_bias > 0 else "NO"
@@ -495,7 +494,7 @@ def detect_category_momentum(markets: List[Market]) -> List[EdgeOpportunity]:
                 suggested_action=f"Category {cat} average at {avg_price:.0%} — this market at {market.current_price:.0%} may catch up",
                 reasoning=f"{cat.capitalize()} category ({len(cat_markets)} markets) averages "
                           f"{avg_price:.0%} (bias {direction}). This market diverges at "
-                          f"{market.current_price:.0%}."
+                          f"{market.current_price:.0%}. Note: category averages are weak signals."
             ))
 
     return opportunities
@@ -506,7 +505,7 @@ def detect_sentiment_edge(
 ) -> List[EdgeOpportunity]:
     """
     Cross-reference news sentiment with market price.
-    Uses data_sources module for headline sentiment.
+    Requires strong sentiment + significant price divergence.
     """
     opportunities = []
 
@@ -515,27 +514,27 @@ def detect_sentiment_edge(
 
     from .data_sources import politics_source
 
-    # Only check top markets by edge score to avoid rate-limiting APIs
     for market in markets[:20]:
         sentiment_data = politics_source.get_news_sentiment(market.question)
         if not sentiment_data:
             continue
 
         sentiment = sentiment_data.get("sentiment", 0.0)
-        if abs(sentiment) < 0.3:
-            continue  # Not strong enough signal
+        # Require stronger sentiment signal (was 0.3, now 0.5)
+        if abs(sentiment) < 0.5:
+            continue
 
         price = market.current_price
 
-        # Strong positive sentiment + low price = buy signal
-        if sentiment > 0.3 and price < 0.4:
+        # Strong positive sentiment + very low price = buy signal
+        if sentiment > 0.5 and price < 0.30:
             edge_strength = sentiment * (0.5 - price)
-            confidence = min(65, 35 + abs(sentiment) * 20 + (0.4 - price) * 50)
+            confidence = min(45, 25 + abs(sentiment) * 15 + (0.3 - price) * 30)
             action = f"Positive sentiment ({sentiment:+.2f}) vs low price ({price:.0%})"
-        # Strong negative sentiment + high price = sell signal
-        elif sentiment < -0.3 and price > 0.6:
+        # Strong negative sentiment + very high price = sell signal
+        elif sentiment < -0.5 and price > 0.70:
             edge_strength = abs(sentiment) * (price - 0.5)
-            confidence = min(65, 35 + abs(sentiment) * 20 + (price - 0.6) * 50)
+            confidence = min(45, 25 + abs(sentiment) * 15 + (price - 0.7) * 30)
             action = f"Negative sentiment ({sentiment:+.2f}) vs high price ({price:.0%})"
         else:
             continue
@@ -554,10 +553,54 @@ def detect_sentiment_edge(
             market_question=market.question,
             suggested_action=action,
             reasoning=f"Based on {article_count} articles from {source}. "
-                      f"Sentiment score {sentiment:+.2f} diverges from market price {price:.0%}."
+                      f"Sentiment score {sentiment:+.2f} diverges from market price {price:.0%}. "
+                      f"Note: keyword-based sentiment is a weak signal."
         ))
 
     return opportunities
+
+
+# =============================================================================
+# DEDUPLICATION
+# =============================================================================
+
+def _deduplicate_opportunities(opportunities: List[EdgeOpportunity]) -> List[EdgeOpportunity]:
+    """
+    Remove duplicate opportunities:
+    1. Same (market_id, edge_type) — keep highest confidence
+    2. Same market_id with overlapping edge types — keep highest confidence
+    """
+    # First pass: deduplicate by (market_id, edge_type)
+    best_by_type: Dict[tuple, EdgeOpportunity] = {}
+    for opp in opportunities:
+        key = (opp.market_id, opp.edge_type.value)
+        existing = best_by_type.get(key)
+        if not existing or opp.confidence > existing.confidence:
+            best_by_type[key] = opp
+
+    deduped = list(best_by_type.values())
+
+    # Second pass: for same market, don't have both arbitrage AND mispricing
+    # (they detect similar things)
+    market_opps: Dict[str, List[EdgeOpportunity]] = defaultdict(list)
+    for opp in deduped:
+        market_opps[opp.market_id].append(opp)
+
+    final = []
+    overlapping_types = {
+        frozenset({"arbitrage", "mispricing"}),
+    }
+    for market_id, opps in market_opps.items():
+        edge_types = {o.edge_type.value for o in opps}
+        for overlap_set in overlapping_types:
+            if overlap_set.issubset(edge_types):
+                # Keep only the highest confidence one from the overlapping set
+                overlap_opps = [o for o in opps if o.edge_type.value in overlap_set]
+                best = max(overlap_opps, key=lambda o: o.confidence)
+                opps = [o for o in opps if o.edge_type.value not in overlap_set] + [best]
+        final.extend(opps)
+
+    return final
 
 
 # =============================================================================
@@ -571,20 +614,20 @@ def detect_all_edges(
 ) -> List[EdgeOpportunity]:
     """
     Run all edge detection algorithms on market data.
-    Returns opportunities sorted by confidence.
+    Returns deduplicated opportunities sorted by confidence.
     """
     opportunities = []
 
     logger.info("Running edge detection...")
 
-    # Original strategies
+    # Strong strategies (real math)
     opportunities.extend(detect_binary_mispricing(markets))
     opportunities.extend(detect_multi_outcome_mispricing(markets))
     opportunities.extend(detect_temporal_arbitrage(markets))
     opportunities.extend(detect_volume_spikes(markets))
     opportunities.extend(detect_liquidity_gaps(markets))
 
-    # New strategies
+    # Weaker strategies (tightened thresholds)
     opportunities.extend(detect_deadline_urgency(markets))
     opportunities.extend(detect_correlation_edge(markets))
     opportunities.extend(detect_category_momentum(markets))
@@ -595,9 +638,12 @@ def detect_all_edges(
     if data_sources:
         opportunities.extend(detect_sentiment_edge(markets, data_sources=True))
 
+    # Deduplicate before returning
+    opportunities = _deduplicate_opportunities(opportunities)
+
     # Sort by confidence
     opportunities.sort(key=lambda x: x.confidence, reverse=True)
 
-    logger.info(f"Found {len(opportunities)} opportunities")
+    logger.info(f"Found {len(opportunities)} opportunities (after dedup)")
 
     return opportunities

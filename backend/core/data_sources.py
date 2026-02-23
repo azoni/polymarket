@@ -90,11 +90,12 @@ class PoliticsDataSource:
     def get_news_sentiment(self, query: str) -> Optional[dict]:
         """
         Get news headlines and basic sentiment for a query.
-        Uses NewsAPI if key available, else Wikipedia current events.
+        Uses NewsAPI if key available. Returns None if no API key
+        (agents should handle missing data honestly, not fake it with Wikipedia).
         """
         if self.news_api_key:
             return self._newsapi_sentiment(query)
-        return self._wikipedia_context(query)
+        return None
 
     def _newsapi_sentiment(self, query: str) -> Optional[dict]:
         """Fetch headlines from NewsAPI and score sentiment."""
@@ -117,32 +118,49 @@ class PoliticsDataSource:
 
         articles = data.get("articles", [])
         if not articles:
-            return {"source": "NewsAPI", "articles": 0, "sentiment": 0.0, "headlines": []}
+            return {"source": "NewsAPI", "articles": 0, "sentiment": 0.0, "headlines": [], "relevance": 0.0}
 
-        # Simple keyword sentiment
-        positive = ["win", "lead", "ahead", "surge", "gain", "rise", "strong", "success", "victory", "approve"]
-        negative = ["lose", "trail", "behind", "drop", "fall", "weak", "fail", "defeat", "decline", "reject"]
+        # Keyword sentiment with relevance weighting
+        positive = ["win", "lead", "ahead", "surge", "gain", "rise", "strong",
+                    "success", "victory", "approve", "support", "favor", "likely"]
+        negative = ["lose", "trail", "behind", "drop", "fall", "weak", "fail",
+                    "defeat", "decline", "reject", "unlikely", "oppose", "crisis"]
+
+        # Extract key terms from the original query for relevance scoring
+        query_terms = set(self._extract_search_terms(query).lower().split())
 
         sentiment_score = 0.0
+        relevance_total = 0.0
         headlines = []
         for a in articles[:10]:
             title = (a.get("title") or "").lower()
             headlines.append(a.get("title", ""))
+
+            # Check how relevant this article is to the actual question
+            title_words = set(title.split())
+            relevance = len(query_terms & title_words) / max(len(query_terms), 1)
+            relevance_total += relevance
+
+            # Weight sentiment by relevance (irrelevant articles count less)
+            weight = 0.3 + (relevance * 0.7)  # min weight 0.3, max 1.0
             for word in positive:
                 if word in title:
-                    sentiment_score += 1
+                    sentiment_score += weight
             for word in negative:
                 if word in title:
-                    sentiment_score -= 1
+                    sentiment_score -= weight
 
         # Normalize to -1 to +1
         if articles:
             sentiment_score = max(-1, min(1, sentiment_score / len(articles)))
 
+        avg_relevance = relevance_total / len(articles) if articles else 0.0
+
         return {
             "source": "NewsAPI",
             "articles": len(articles),
             "sentiment": round(sentiment_score, 3),
+            "relevance": round(avg_relevance, 3),
             "headlines": headlines[:5],
         }
 
@@ -464,17 +482,35 @@ class CryptoDataSource:
         return None
 
     def parse_price_target(self, question: str) -> Optional[float]:
-        """Extract a price target from a question like 'Will BTC reach $100k?'"""
-        q = question.replace(",", "")
-        match = re.search(r'\$(\d+(?:\.\d+)?)\s*k', q, re.IGNORECASE)
-        if match:
-            return float(match.group(1)) * 1000
+        """
+        Extract a price target from a question like 'Will BTC reach $100k?'
+        Handles: $100k, $100K, $100,000, $1.5M, $1,500,000, 100k, $150000
+        """
+        q = question
 
-        match = re.search(r'\$([\d.]+)', q)
+        # Pattern 1: $100k, $1.5k, $100K (k/K suffix = multiply by 1000)
+        match = re.search(r'\$?\s*(\d+(?:[.,]\d+)?)\s*[kK]\b', q)
+        if match:
+            val_str = match.group(1).replace(",", "")
+            return float(val_str) * 1000
+
+        # Pattern 2: $1.5M, $1M (M suffix = multiply by 1,000,000)
+        match = re.search(r'\$?\s*(\d+(?:\.\d+)?)\s*[mM]\b', q)
+        if match:
+            return float(match.group(1)) * 1_000_000
+
+        # Pattern 3: $100,000 or $1,500,000 (comma-separated)
+        match = re.search(r'\$\s*(\d{1,3}(?:,\d{3})+)', q)
+        if match:
+            return float(match.group(1).replace(",", ""))
+
+        # Pattern 4: $150000, $5000 (plain dollar amount > 100)
+        match = re.search(r'\$\s*(\d+(?:\.\d+)?)', q)
         if match:
             val = float(match.group(1))
             if val > 100:  # likely a price target, not a bet amount
                 return val
+
         return None
 
 

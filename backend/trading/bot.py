@@ -37,7 +37,7 @@ class TradingBot:
             self.config = config or trading_config
             self.trader = PolymarketTrader(self.config)
 
-        self.risk = RiskManager(self.config)
+        self.risk = RiskManager(self.config, db=db, exchange=exchange)
         self.strategy = TradingStrategy(self.trader, self.risk, self.config, exchange=exchange)
         self._running = False
         self._cycles = 0

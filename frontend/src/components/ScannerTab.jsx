@@ -24,30 +24,10 @@ const SORT_OPTIONS = [
   { value: 'spread_pct', label: 'Spread' },
 ];
 
-const CATEGORY_COLORS = {
-  politics: 'blue', sports: 'green', crypto: 'yellow',
-  economics: 'purple', entertainment: 'purple', science: 'blue', other: 'gray',
-};
-
-const EDGE_TYPE_LABELS = {
-  arbitrage: { label: 'Arbitrage', color: 'green' },
-  mispricing: { label: 'Mispricing', color: 'yellow' },
-  volume_signal: { label: 'Volume Signal', color: 'purple' },
-  liquidity_gap: { label: 'Liquidity Gap', color: 'blue' },
-  sentiment: { label: 'Sentiment', color: 'blue' },
-  correlation: { label: 'Correlation', color: 'purple' },
-  deadline_urgency: { label: 'Deadline', color: 'red' },
-  consensus_divergence: { label: 'Consensus', color: 'yellow' },
-  category_momentum: { label: 'Momentum', color: 'green' },
-};
-
-const DIRECTION_INFO = {
-  buy_yes: { label: 'Buy YES', color: 'green' },
-  buy_no: { label: 'Buy NO', color: 'red' },
-  hold: { label: 'Hold', color: 'gray' },
-};
-
-const RISK_COLORS = { low: 'green', medium: 'yellow', high: 'red' };
+import { CATEGORY_COLORS, EDGE_TYPE_LABELS, DIRECTION_INFO, RISK_COLORS } from '../constants';
+import { TabIntroBanner } from './TabIntroBanner';
+import { HelpIcon } from './Tooltip';
+import { TAB_INTROS, METRIC_HELP } from '../tooltips';
 
 export function ScannerTab({ opportunities, predictions, exchange }) {
   const [markets, setMarkets] = useState([]);
@@ -57,6 +37,7 @@ export function ScannerTab({ opportunities, predictions, exchange }) {
   const [search, setSearch] = useState('');
   const [expandedMarket, setExpandedMarket] = useState(null);
   const [marketEdges, setMarketEdges] = useState(null);
+  const [showEdgesOnly, setShowEdgesOnly] = useState(true);
   const searchTimer = useRef(null);
 
   // Index opportunities and predictions by market_id for badge display
@@ -94,6 +75,13 @@ export function ScannerTab({ opportunities, predictions, exchange }) {
     fetchMarkets();
   }, [exchange]);
 
+  // Cleanup search debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(searchTimer.current);
+    };
+  }, []);
+
   const handleCategoryChange = (val) => {
     setCategory(val);
     setExpandedMarket(null);
@@ -130,8 +118,15 @@ export function ScannerTab({ opportunities, predictions, exchange }) {
     }
   };
 
+  const edgeMarketIds = new Set(Object.keys(oppsByMarket));
+  const displayMarkets = showEdgesOnly
+    ? markets.filter(m => edgeMarketIds.has(m.market_id))
+    : markets;
+
   return (
     <div className="scanner-tab">
+      <TabIntroBanner tabName="scanner" text={TAB_INTROS.scanner} />
+
       {/* Filter Bar */}
       <div className="scanner-filters">
         <div className="scanner-filter-group">
@@ -158,6 +153,15 @@ export function ScannerTab({ opportunities, predictions, exchange }) {
           </select>
         </div>
 
+        <label className="edge-filter-toggle">
+          <input
+            type="checkbox"
+            checked={showEdgesOnly}
+            onChange={e => setShowEdgesOnly(e.target.checked)}
+          />
+          Edges only
+        </label>
+
         <div className="scanner-filter-group" style={{ flex: 1 }}>
           <input
             type="text"
@@ -169,7 +173,10 @@ export function ScannerTab({ opportunities, predictions, exchange }) {
         </div>
 
         <span className="text-muted" style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}>
-          {markets.length} markets
+          {showEdgesOnly
+            ? `${displayMarkets.length} with edges (${markets.length} total)`
+            : `${markets.length} markets`
+          }
         </span>
       </div>
 
@@ -182,13 +189,19 @@ export function ScannerTab({ opportunities, predictions, exchange }) {
       )}
 
       {/* Market List */}
-      {!loading && markets.length === 0 && (
+      {!loading && displayMarkets.length === 0 && (
         <div className="empty-state">
-          <p className="text-muted">No markets found. Click "Refresh Data" in the header to fetch markets.</p>
+          <h4>{markets.length === 0 ? 'No markets loaded' : 'No markets with edges'}</h4>
+          <p className="text-muted">
+            {markets.length === 0
+              ? 'Click "Refresh Data" in the header to fetch live markets from the exchange.'
+              : 'Try unchecking "Edges only" to see all markets, or run a scan to detect new edges.'
+            }
+          </p>
         </div>
       )}
 
-      {!loading && markets.map(market => {
+      {!loading && displayMarkets.map(market => {
         const isExpanded = expandedMarket === market.market_id;
         const catColor = CATEGORY_COLORS[market.category] || 'gray';
         const marketOpps = oppsByMarket[market.market_id] || [];
@@ -261,11 +274,11 @@ export function ScannerTab({ opportunities, predictions, exchange }) {
                 <div className="market-detail-section">
                   <div className="metrics">
                     <div className="metric">
-                      <span className="label">Spread</span>
+                      <span className="label">Spread <HelpIcon tooltip={METRIC_HELP.spread} position="bottom" /></span>
                       <span className="value">{market.spread_pct.toFixed(1)}%</span>
                     </div>
                     <div className="metric">
-                      <span className="label">Liquidity</span>
+                      <span className="label">Liquidity <HelpIcon tooltip={METRIC_HELP.liquidity} position="bottom" /></span>
                       <span className="value">${market.liquidity.toLocaleString()}</span>
                     </div>
                     <div className="metric">

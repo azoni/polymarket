@@ -21,11 +21,9 @@ const STATUS_COLORS = {
   offline: 'red',
 };
 
-const DIRECTION_INFO = {
-  buy_yes: { label: 'Buy YES', color: 'green' },
-  buy_no: { label: 'Buy NO', color: 'red' },
-  hold: { label: 'Hold', color: 'gray' },
-};
+import { DIRECTION_INFO } from '../constants';
+import { TabIntroBanner } from './TabIntroBanner';
+import { TAB_INTROS } from '../tooltips';
 
 export function ResearchTab({ exchange }) {
   const [agents, setAgents] = useState([]);
@@ -85,6 +83,7 @@ export function ResearchTab({ exchange }) {
 
   return (
     <div className="research-tab">
+      <TabIntroBanner tabName="research" text={TAB_INTROS.research} />
       {/* Agent Status Grid */}
       <div className="agent-grid">
         {agents.map(agent => {

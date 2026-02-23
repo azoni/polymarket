@@ -4,14 +4,24 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { StatCard, DashboardTab, ScannerTab, ResearchTab } from './components';
+import { StatCard, DashboardTab, ScannerTab, ResearchTab, ErrorBoundary, OverviewTab, OnboardingWizard, ProgressSteps } from './components';
+import { SETTINGS_UNLIMITED } from './constants';
+import { useLocalStorage, useBotStatus } from './hooks';
 import * as api from './api/client';
 
 const TABS = {
+  OVERVIEW: 'overview',
   DASHBOARD: 'dashboard',
   SCANNER: 'scanner',
   RESEARCH: 'research',
 };
+
+const REFRESH_STEPS = [
+  { label: 'Connecting' },
+  { label: 'Fetching' },
+  { label: 'Processing' },
+  { label: 'Done' },
+];
 
 const EXCHANGES = [
   { id: 'polymarket', name: 'Polymarket' },
@@ -20,7 +30,7 @@ const EXCHANGES = [
 
 export default function App() {
   // State
-  const [activeTab, setActiveTab] = useState(TABS.DASHBOARD);
+  const [activeTab, setActiveTab] = useState(TABS.OVERVIEW);
   const [activeExchange, setActiveExchange] = useState('polymarket');
   const [stats, setStats] = useState(null);
   const [opportunities, setOpportunities] = useState([]);
@@ -48,8 +58,16 @@ export default function App() {
   const [polyConfig, setPolyConfig] = useState(null);
   const [kalshiConfigState, setKalshiConfigState] = useState(null);
 
+  // Onboarding
+  const [onboardingDone, setOnboardingDone] = useLocalStorage('onboarding_complete', false);
+
+  // Bot status for header indicator
+  const { statusClass, label: statusLabel } = useBotStatus(scanning, refreshing, autoScanning);
+
   // Auto-refresh interval ref
   const autoRefreshRef = useRef(null);
+  // Refresh polling interval ref (for cleanup)
+  const refreshPollRef = useRef(null);
 
   const addToast = useCallback((message, type = 'info') => {
     const id = ++toastIdRef.current;
@@ -195,8 +213,24 @@ export default function App() {
     };
   }, [activeTab, fetchTradingData]);
 
+  // Cleanup refresh polling on unmount
+  useEffect(() => {
+    return () => {
+      if (refreshPollRef.current) {
+        clearInterval(refreshPollRef.current);
+        refreshPollRef.current = null;
+      }
+    };
+  }, []);
+
   // Refresh from Polymarket
   const handleRefresh = async () => {
+    // Clear any existing poll interval
+    if (refreshPollRef.current) {
+      clearInterval(refreshPollRef.current);
+      refreshPollRef.current = null;
+    }
+
     try {
       setRefreshing(true);
       setRefreshStatus('Starting refresh...');
@@ -208,7 +242,7 @@ export default function App() {
       let pollCount = 0;
       const maxPolls = 60;
 
-      const pollInterval = setInterval(async () => {
+      refreshPollRef.current = setInterval(async () => {
         pollCount++;
         try {
           const status = await api.getStatus();
@@ -216,19 +250,22 @@ export default function App() {
             setRefreshStatus(`Processing ${status.markets_loaded} markets...`);
           }
           if (!status.is_loading) {
-            clearInterval(pollInterval);
+            clearInterval(refreshPollRef.current);
+            refreshPollRef.current = null;
             setRefreshing(false);
             setRefreshStatus('');
             await fetchData();
           } else if (pollCount >= maxPolls) {
-            clearInterval(pollInterval);
+            clearInterval(refreshPollRef.current);
+            refreshPollRef.current = null;
             setRefreshing(false);
             setRefreshStatus('');
             setError('Refresh timed out. Check server logs.');
             await fetchData();
           }
         } catch (err) {
-          clearInterval(pollInterval);
+          clearInterval(refreshPollRef.current);
+          refreshPollRef.current = null;
           setRefreshing(false);
           setRefreshStatus('');
           setError(err.message);
@@ -279,7 +316,13 @@ export default function App() {
     <div className="app">
       {/* Header */}
       <header className="header">
-        <h1>Polymarket Trading Platform</h1>
+        <div className="flex items-center gap-sm">
+          <h1>Polymarket Trading Platform</h1>
+          <div className="header-status">
+            <span className={`status-dot ${statusClass}`} />
+            <span>{statusLabel}</span>
+          </div>
+        </div>
         <div className="flex gap-sm items-center">
           <button
             className="btn whitepaper-btn"
@@ -338,7 +381,7 @@ export default function App() {
         )}
 
         {/* Refresh Status Banner */}
-        {refreshing && refreshStatus && (
+        {refreshing && (
           <div style={{
             background: 'rgba(96, 165, 250, 0.08)',
             border: '1px solid rgba(96, 165, 250, 0.2)',
@@ -348,11 +391,19 @@ export default function App() {
             color: '#60a5fa',
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
+            gap: 12,
             fontSize: 13,
           }}>
             <div className="spinner" style={{ width: 14, height: 14 }} />
-            {refreshStatus}
+            <ProgressSteps
+              steps={REFRESH_STEPS}
+              currentStep={
+                refreshStatus.includes('Processing') ? 2
+                : refreshStatus.includes('Fetching') ? 1
+                : refreshStatus.includes('Starting') ? 0
+                : 0
+              }
+            />
           </div>
         )}
 
@@ -367,6 +418,12 @@ export default function App() {
         {/* Exchange Selector + Tabs */}
         <div className="tabs-row">
           <div className="tabs">
+            <button
+              className={`tab ${activeTab === TABS.OVERVIEW ? 'active' : ''}`}
+              onClick={() => setActiveTab(TABS.OVERVIEW)}
+            >
+              Overview
+            </button>
             <button
               className={`tab ${activeTab === TABS.DASHBOARD ? 'active' : ''}`}
               onClick={() => { setActiveTab(TABS.DASHBOARD); fetchTradingData(); }}
@@ -410,7 +467,24 @@ export default function App() {
 
         {/* Content */}
         {!loading && (
-          <>
+          <ErrorBoundary>
+            {/* Overview Tab */}
+            {activeTab === TABS.OVERVIEW && (
+              <OverviewTab
+                stats={stats}
+                tradingStatus={tradingStatus}
+                tradingSignals={tradingSignals}
+                opportunities={opportunities}
+                predictions={predictions}
+                scanning={scanning}
+                autoScanning={autoScanning}
+                onScan={handleScan}
+                onAutoScanToggle={handleAutoScanToggle}
+                onNavigate={(tab) => setActiveTab(tab)}
+                activeExchange={activeExchange}
+              />
+            )}
+
             {/* Dashboard Tab */}
             {activeTab === TABS.DASHBOARD && (
               <DashboardTab
@@ -438,7 +512,7 @@ export default function App() {
             {activeTab === TABS.RESEARCH && (
               <ResearchTab exchange={activeExchange} />
             )}
-          </>
+          </ErrorBoundary>
         )}
       </main>
 
@@ -499,6 +573,16 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Onboarding Wizard */}
+      {!onboardingDone && (
+        <OnboardingWizard
+          onComplete={() => setOnboardingDone(true)}
+          onRefresh={handleRefresh}
+          refreshing={refreshing}
+          refreshStatus={refreshStatus}
+        />
       )}
 
       {/* White Paper Modal */}
@@ -671,8 +755,6 @@ export default function App() {
 }
 
 /* ─── Settings Panel (used inside Settings modal) ─── */
-
-const SETTINGS_UNLIMITED = 999999;
 
 const ALL_EDGE_TYPES = [
   { value: 'arbitrage', label: 'Arbitrage', color: 'green' },

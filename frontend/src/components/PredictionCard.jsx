@@ -3,11 +3,7 @@
  * Displays a research agent's prediction for a market.
  */
 
-const DIRECTION_INFO = {
-  buy_yes: { label: 'Buy YES', color: 'green' },
-  buy_no: { label: 'Buy NO', color: 'red' },
-  hold: { label: 'Hold', color: 'gray' },
-};
+import { DIRECTION_INFO } from '../constants';
 
 export function PredictionCard({ prediction }) {
   const directionInfo = DIRECTION_INFO[prediction.direction] || { label: prediction.direction, color: 'gray' };

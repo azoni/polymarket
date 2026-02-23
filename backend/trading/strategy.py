@@ -199,13 +199,12 @@ class TradingStrategy:
                     return no_token.token_id, "BUY", no_token.price
 
         elif edge_val == "mispricing":
-            action = opp.suggested_action.lower()
-            if "buy" in action and "yes" in action and yes_token:
-                return yes_token.token_id, "BUY", yes_token.price
-            elif "buy" in action and "no" in action and no_token:
-                return no_token.token_id, "BUY", no_token.price
-            elif "sell" in action and yes_token:
-                return yes_token.token_id, "SELL", yes_token.price
+            # Overpriced market: sell the more expensive side
+            if yes_token and no_token:
+                if yes_token.price > no_token.price and _in_range(yes_token):
+                    return yes_token.token_id, "SELL", round(yes_token.price * (2 - aggr), 3)
+                elif _in_range(no_token):
+                    return no_token.token_id, "SELL", round(no_token.price * (2 - aggr), 3)
 
         elif edge_val == "liquidity_gap":
             tradeable = None
@@ -221,49 +220,56 @@ class TradingStrategy:
                     return tradeable.token_id, "BUY", round(bid_price, 3)
 
         elif edge_val == "volume_signal":
-            action = opp.suggested_action.lower()
-            if "yes" in action and _in_range(yes_token):
+            # Volume supports the side the price is leaning toward
+            if market.current_price > 0.5 and _in_range(yes_token):
                 return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
-            elif "no" in action and _in_range(no_token):
+            elif market.current_price < 0.5 and _in_range(no_token):
                 return no_token.token_id, "BUY", round(no_token.price * aggr, 3)
 
         elif edge_val == "sentiment":
-            action = opp.suggested_action.lower()
-            if "positive" in action and _in_range(yes_token):
+            # Positive sentiment -> buy YES; negative -> buy NO
+            if "positive" in opp.description.lower() and _in_range(yes_token):
                 return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
-            elif "negative" in action and _in_range(no_token):
+            elif "negative" in opp.description.lower() and _in_range(no_token):
                 return no_token.token_id, "BUY", round(no_token.price * aggr, 3)
 
         elif edge_val == "consensus_divergence":
-            action = opp.suggested_action.lower()
-            if "buy yes" in action and _in_range(yes_token):
+            # Agent sees higher probability -> buy YES; lower -> buy NO
+            if "buy yes" in opp.suggested_action.lower() and _in_range(yes_token):
                 return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
-            elif "buy no" in action and _in_range(no_token):
+            elif "buy no" in opp.suggested_action.lower() and _in_range(no_token):
                 return no_token.token_id, "BUY", round(no_token.price * aggr, 3)
 
         elif edge_val == "deadline_urgency":
+            # Near deadline: lean with the price direction
             if market.current_price > 0.55 and _in_range(yes_token):
                 return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
             elif market.current_price < 0.45 and _in_range(no_token):
                 return no_token.token_id, "BUY", round(no_token.price * aggr, 3)
 
-        elif edge_val == "correlation":
-            action = opp.suggested_action.lower()
-            if "follow" in action and _in_range(yes_token):
+        elif edge_val in ("correlation", "category_momentum"):
+            # Follow the direction the related market/category is trending
+            if market.current_price < 0.45 and _in_range(yes_token):
+                # Market is low relative to peers, buy YES expecting catch-up
                 return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
-
-        elif edge_val == "category_momentum":
-            action = opp.suggested_action.lower()
-            trending_part = action.split("trending")[-1] if "trending" in action else ""
-            if "yes" in trending_part and _in_range(yes_token):
-                return yes_token.token_id, "BUY", round(yes_token.price * aggr, 3)
-            elif _in_range(no_token):
+            elif market.current_price > 0.55 and _in_range(no_token):
                 return no_token.token_id, "BUY", round(no_token.price * aggr, 3)
 
         return "", "", 0
 
+    def _deduplicate_signals(self, signals: list[TradeSignal]) -> list[TradeSignal]:
+        """Keep only the highest-confidence signal per token_id."""
+        best_by_token: dict[str, TradeSignal] = {}
+        for sig in signals:
+            existing = best_by_token.get(sig.token_id)
+            if not existing or sig.confidence > existing.confidence:
+                best_by_token[sig.token_id] = sig
+        return list(best_by_token.values())
+
     def execute_signals(self, signals: list[TradeSignal]) -> list[dict]:
         """Execute a list of trade signals through risk checks and the trader."""
+        # Deduplicate: only one signal per token
+        signals = self._deduplicate_signals(signals)
         results = []
 
         for signal in signals:
@@ -295,6 +301,7 @@ class TradingStrategy:
                     market=signal.market_question,
                     edge_type=signal.edge_type,
                     reasoning=signal.reasoning,
+                    market_id=signal.market_id,
                 )
                 results.append({
                     "status": "executed" if not self.config.dry_run else "dry_run",
